@@ -1,21 +1,9 @@
 {
-  "name": "my-career-path",
+  "name": "my-career-path-workspace",
   "private": true,
-  "version": "0.0.0",
-  "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
-  },
-  "dependencies": {
-    "@tailwindcss/vite": "latest",
-    "@vitejs/plugin-react": "^4.3.4",
-    "framer-motion": "^12.42.2",
-    "lucide-react": "latest",
-    "react": "latest",
-    "react-dom": "latest",
-    "tailwindcss": "latest",
-    "vite": "^5.4.10"
+    "dev": "npm --prefix src run dev",
+    "build": "npm --prefix src run build",
+    "preview": "npm --prefix src run preview"
   }
 }

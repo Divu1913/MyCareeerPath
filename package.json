@@ -1,9 +1,17 @@
 {
-  "name": "my-career-path-workspace",
+  "name": "my-career-path",
   "private": true,
+  "version": "1.0.0",
+  "type": "module",
   "scripts": {
-    "dev": "npm --prefix src run dev",
-    "build": "npm --prefix src run build",
-    "preview": "npm --prefix src run preview"
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "vite": "latest",
+    "react": "latest",
+    "react-dom": "latest"
   }
 }

@@ -1,0 +1,11 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Base body styling — keeps the page from flashing a white background
+   before theme.css loads. theme.css still wins because it uses !important. */
+html,
+body,
+#root {
+  min-height: 100%;
+}

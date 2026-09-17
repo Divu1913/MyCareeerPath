@@ -70,6 +70,23 @@ web_modules/
 .env.*
 !.env.example
 
+# Backend env + runtime artifacts
+backend/.env
+backend/venv/
+backend/**/__pycache__/
+*.pyc
+*.pyo
+
+# Frontend / root logs
+build.log
+devserver.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+
+
 # parcel-bundler cache (https://parceljs.org/)
 .cache
 .parcel-cache

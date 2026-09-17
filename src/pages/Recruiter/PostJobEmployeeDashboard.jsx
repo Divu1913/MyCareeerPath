@@ -1,0 +1,37 @@
+import { useState } from "react";
+import { Bold, Italic, Link, List, ListOrdered, Underline } from "lucide-react";
+import { api } from "../../api.js";
+
+const EMPTY_FORM = { title: "", category: "", type: "Full-time", location: "", description: "", skills: "", min_eligibility: "", company_name: "", company_website: "", company_address: "", company_tax_id: "" };
+
+const parseSkills = (raw) => raw.split(",").map((skill) => skill.trim()).filter(Boolean);
+
+export default function PostJobEmployeeDashboard({ user, onCancel, onCreated }) {
+  const [form, setForm] = useState({ ...EMPTY_FORM, company_name: user?.company_name || "", company_website: user?.company_website || "", company_address: user?.company_address || "", company_tax_id: user?.company_tax_id || "" });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const update = (field) => (event) => setForm((current) => ({ ...current, [field]: event.target.value }));
+
+  async function submit(event) {
+    event.preventDefault();
+    if (submitting) return;
+    setSubmitting(true); setError("");
+    try {
+      const created = await api.createItem({ title: form.title.trim(), description: form.description.trim(), tags: parseSkills(form.skills), min_eligibility: form.min_eligibility || undefined, price: 0, is_published: true, company_name: form.company_name.trim(), company_website: form.company_website.trim(), company_address: form.company_address.trim(), company_tax_id: form.company_tax_id.trim() });
+      onCreated?.(created);
+    } catch (err) { setError(err?.message || "Failed to publish job."); }
+    finally { setSubmitting(false); }
+  }
+
+  return <main className="post-job-page min-h-screen bg-slate-50 text-slate-800"><div className="mx-auto max-w-6xl px-6 py-9">
+    <header className="border-b border-slate-200 pb-6"><p className="text-sm font-bold uppercase tracking-wide text-[var(--theme-orange)]">Recruitment workspace</p><h1 className="mt-1 text-3xl font-black text-[var(--theme-navy)]">Post New Job</h1><p className="mt-2 text-slate-500">Create a polished job post that helps qualified candidates understand your role, team, and expectations.</p></header>
+    <form onSubmit={submit} className="mt-7 rounded-2xl border border-[var(--theme-border)] bg-white p-6 shadow-sm sm:p-8">
+      <Step number="1" title="Basic Information" required><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4"><Field label="Job Title"><input required value={form.title} onChange={update("title")} placeholder="e.g. Java Developer" /></Field><Field label="Job Category"><select required value={form.category} onChange={update("category")}><option value="">Select category</option><option>Engineering</option><option>Design</option><option>Sales</option><option>Operations</option></select></Field><Field label="Job Type"><select value={form.type} onChange={update("type")}><option>Full-time</option><option>Part-time</option><option>Contract</option><option>Internship</option></select></Field><Field label="Job Location"><input required value={form.location} onChange={update("location")} placeholder="e.g. Bengaluru, Karnataka" /></Field></div></Step>
+      <Step number="2" title="Job Description" required><p className="mb-4 text-sm text-slate-500">Describe the role, responsibilities, and what success looks like.</p><div className="overflow-hidden rounded-xl border border-slate-200"><div className="flex gap-1 border-b border-slate-200 bg-slate-50 p-2">{[Bold, Italic, Underline, List, ListOrdered, Link].map((Icon) => <button key={Icon.displayName || Icon.name} type="button" className="rounded p-1.5 text-slate-500 hover:bg-white hover:text-[var(--theme-orange)]" aria-label="Formatting option"><Icon size={16} /></button>)}</div><textarea required rows={8} value={form.description} onChange={update("description")} placeholder="Write the job description here..." className="block w-full resize-y border-0 px-4 py-3 text-sm outline-none" /></div></Step>
+      <Step number="3" title="Required Skills" required><Field label="Skills and keywords"><input required value={form.skills} onChange={update("skills")} placeholder="React, JavaScript, Node.js, communication" /></Field><p className="mt-2 text-xs text-slate-500">Separate skills with commas. These appear as candidate-searchable job tags.</p><div className="mt-4"><Field label="Minimum education eligibility"><select value={form.min_eligibility} onChange={update("min_eligibility")}><option value="">No minimum specified</option><option>10th</option><option>12th</option><option>ITI</option><option>Diploma</option><option>Undergraduate</option><option>Graduate</option><option>Postgraduate</option></select></Field></div></Step>
+      <section className="mt-7 rounded-xl border border-slate-200 bg-slate-50 p-5"><h2 className="font-bold text-[var(--theme-navy)]">Company verification</h2><p className="mt-1 text-sm text-slate-500">Required information displayed with this posting.</p><div className="mt-4 grid gap-4 md:grid-cols-2"><Field label="Company Name"><input required value={form.company_name} onChange={update("company_name")} /></Field><Field label="Company Website"><input required type="url" value={form.company_website} onChange={update("company_website")} /></Field><Field label="Company Address"><textarea required rows={2} value={form.company_address} onChange={update("company_address")} /></Field><Field label="Tax ID / Registration Number"><input required value={form.company_tax_id} onChange={update("company_tax_id")} /></Field></div></section>
+      {error && <p role="alert" className="mt-5 rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{error}</p>}<div className="mt-7 flex justify-end gap-3"><button type="button" onClick={onCancel} disabled={submitting} className="rounded-lg border border-slate-300 px-5 py-2.5 text-sm font-bold text-slate-700">Cancel</button><button type="submit" disabled={submitting} className="rounded-lg bg-[var(--theme-orange)] px-5 py-2.5 text-sm font-bold text-white shadow-sm disabled:opacity-60">{submitting ? "Publishing..." : "Publish Job"}</button></div>
+    </form></div></main>;
+}
+function Step({ number, title, required, children }) { return <section className="border-b border-slate-100 py-6 first:pt-0 last:border-0"><h2 className="flex items-center gap-3 text-lg font-bold text-[var(--theme-navy)]"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-sm text-blue-700">{number}</span>{title}{required && <span className="text-[var(--theme-orange)]">*</span>}</h2><div className="mt-5">{children}</div></section>; }
+function Field({ label, children }) { return <label className="block"><span className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-600">{label}</span><span className="block [&_input]:block [&_input]:w-full [&_input]:rounded-lg [&_input]:border [&_input]:border-slate-300 [&_input]:bg-white [&_input]:px-3 [&_input]:py-2.5 [&_input]:text-sm [&_input]:outline-none [&_input:focus]:border-[var(--theme-orange)] [&_select]:block [&_select]:w-full [&_select]:rounded-lg [&_select]:border [&_select]:border-slate-300 [&_select]:bg-white [&_select]:px-3 [&_select]:py-2.5 [&_select]:text-sm [&_textarea]:block [&_textarea]:w-full [&_textarea]:rounded-lg [&_textarea]:border [&_textarea]:border-slate-300 [&_textarea]:bg-white [&_textarea]:px-3 [&_textarea]:py-2.5 [&_textarea]:text-sm">{children}</span></label>; }

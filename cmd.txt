@@ -1,0 +1,21 @@
+C:\Users\HP\MyCareerPath\Backend>cd C:\Users\HP\MyCareerPath\Backend
+
+C:\Users\HP\MyCareerPath\Backend>
+C:\Users\HP\MyCareerPath\Backend>venv\Scripts\activate
+
+(venv) C:\Users\HP\MyCareerPath\Backend>uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+
+C:\Users\HP>cd C:\Users\HP\MyCareerPath
+
+C:\Users\HP\MyCareerPath>npm run dev
+
+> my-career-path@1.0.0 dev
+> vite
+
+
+  VITE v8.2.0  ready in 4618 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: use --host to expose
+  ➜  press h + enter to show help

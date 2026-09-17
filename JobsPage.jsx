@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import ChatDialog from "./src/ChatDialog.jsx";
+import { api } from "./src/api.js";
 
 // ---------- Static data ----------
 
@@ -143,6 +144,13 @@ export default function JobsPage({ categoryFilter = null }) {
   const [activeTab, setActiveTab] = useState("skills");
   const [selected, setSelected] = useState(null); // { key, jobs, title, count }
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [verifiedJobs, setVerifiedJobs] = useState([]);
+
+  useEffect(() => {
+    api.getPublicJobs({ page: 1, size: 12 })
+      .then((data) => setVerifiedJobs(Array.isArray(data?.items) ? data.items : []))
+      .catch(() => setVerifiedJobs([]));
+  }, []);
 
   function handleTabClick(key) {
     setActiveTab(key);
@@ -323,6 +331,28 @@ export default function JobsPage({ categoryFilter = null }) {
 
           <div className="view-all-row">
             <div className="h-[38px]" aria-hidden="true"></div>
+          </div>
+        </div>
+      )}
+
+      {verifiedJobs.length > 0 && (
+        <div className="card results show">
+          <div className="results-header"><div className="results-title">Verified company job postings</div></div>
+          <div className="job-list">
+            {verifiedJobs.map((job) => (
+              <div className="job-card" key={job.id || job._id}>
+                <div className="job-main">
+                  <div className="job-title">{job.title}</div>
+                  <div className="job-company">{job.company_name || "Company details pending"}</div>
+                  <div className="job-meta">
+                    {job.company_address && <span>📍 {job.company_address}</span>}
+                    {job.company_website && <a href={job.company_website} target="_blank" rel="noreferrer">Company website ↗</a>}
+                    {job.company_tax_id && <span>✓ Tax ID verified</span>}
+                  </div>
+                </div>
+                <button className="job-apply">Apply Now</button>
+              </div>
+            ))}
           </div>
         </div>
       )}

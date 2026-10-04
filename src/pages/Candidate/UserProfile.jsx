@@ -10,7 +10,7 @@
 //   7. My Activities    (real applications from api.getApplications)
 //
 // Skills, certifications, education, and experience live in localStorage.
-// Contact details are persisted through PUT /api/users/{id}.
+// Contact details and education are persisted through PUT /api/v1/candidate/profile.
 //
 // Props: user (from api.me()), onBack fn, onLogout fn
 
@@ -167,13 +167,38 @@ export default function UserProfile({ user, onBack, onProfile, onDashboard, onSe
   }
 
   async function saveContact(contact) {
-    const updated = await api.updateProfile(userId, contact);
+    const payload = {
+      email: contact.email,
+      phone: contact.phone,
+      location: contact.location,
+      state: contact.state,
+      district: contact.district,
+      local_address: contact.local_address,
+      headline: contact.headline,
+      linkedin: contact.linkedin || contact.linkedin_url || "",
+      linkedin_url: contact.linkedin_url || contact.linkedin || "",
+      github: contact.github || contact.github_url || "",
+      github_url: contact.github_url || contact.github || "",
+      leetcode_url: contact.leetcode_url || contact.leetcode || "",
+      website: contact.website || "",
+      education,
+    };
+    let updated;
+    try {
+      updated = await api.updateCandidateProfile(payload);
+    } catch (error) {
+      // Keep profile editing functional against an older API deployment until
+      // the candidate-specific route has been rolled out there.
+      if (error?.status !== 404) throw error;
+      updated = await api.updateProfile(userId, payload);
+    }
     if (onUpdateUser) {
-      onUpdateUser(updated);
+      onUpdateUser({ ...(user || {}), ...updated });
     }
     const stored = loadProfile(user);
-    localStorage.setItem(profileKey(user), JSON.stringify({ ...stored, ...contact }));
-    refresh();
+    const nextProfile = { ...stored, ...payload, ...updated };
+    localStorage.setItem(profileKey(user), JSON.stringify(nextProfile));
+    setProfile(nextProfile);
     setModal(null);
   }
 

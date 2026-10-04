@@ -51,10 +51,19 @@ def _send_twilio(phone_number: str, message: str) -> None:
     if not (settings.TWILIO_ACCOUNT_SID and settings.TWILIO_AUTH_TOKEN and sender):
         raise RuntimeError("Twilio credentials are not configured")
     endpoint = f"https://api.twilio.com/2010-04-01/Accounts/{settings.TWILIO_ACCOUNT_SID}/Messages.json"
-    # The app stores Indian mobile identifiers as ten digits for Fast2SMS.
-    # Twilio requires E.164, so normalize that local representation here.
+    # The app stores Indian mobiles as ten digits for Fast2SMS. Twilio requires
+    # E.164, so normalize local, 0-prefixed, and 91-prefixed forms here.
     digits = re.sub(r"\D", "", phone_number)
-    destination = f"+91{digits}" if not phone_number.startswith("+") and len(digits) == 10 else phone_number
+    if len(digits) == 10:
+        destination = f"+91{digits}"
+    elif len(digits) == 11 and digits.startswith("0"):
+        destination = f"+91{digits[1:]}"
+    elif len(digits) == 12 and digits.startswith("91"):
+        destination = f"+{digits}"
+    elif phone_number.startswith("+"):
+        destination = f"+{digits}"
+    else:
+        raise ValueError("Twilio destination must be a valid E.164 phone number")
     request = Request(endpoint, data=urlencode({"To": destination, "From": sender, "Body": message}).encode(), method="POST")
     token = base64.b64encode(f"{settings.TWILIO_ACCOUNT_SID}:{settings.TWILIO_AUTH_TOKEN}".encode()).decode()
     request.add_header("Authorization", f"Basic {token}")

@@ -1,9 +1,8 @@
 """Job recommendation endpoint.
 
 `POST /api/v1/recommendations/jobs` accepts a candidate's skills and
-optional preferred roles, scores every published item in the `items`
-collection against that profile, and returns the top-N matches in
-descending score order.
+optional preferred roles, scores published items against explicit job
+skill tags, and returns the top-N matches in descending score order.
 
 Scoring model (kept simple and transparent):
 - Build a normalized skill set (lowercased, trimmed, non-empty) from the
@@ -11,9 +10,9 @@ Scoring model (kept simple and transparent):
 - Pull every published item from MongoDB (capped at a sane upper bound
   so a runaway query can't OOM the worker — adjust `MAX_CANDIDATE_ITEMS`
   if you have more items than that).
-- For each item, build a "haystack" from `title`, `description`, and
-  `tags` (all lowercased). Count the intersection of candidate skills
-  with the haystack. The score is `matched / len(skills)` in [0, 1].
+- For each item, compare normalized candidate skills to the job's `tags`
+  (the required skills supplied by recruiters). The score is
+  `matched / len(skills)` in [0, 1].
 - If `preferred_roles` is set, an item must contain at least one of
   those role keywords in the haystack to be considered. This is a
   filter, not a scorer — a job in the wrong domain shouldn't sneak in
@@ -23,6 +22,7 @@ Scoring model (kept simple and transparent):
   stable.
 """
 import logging
+import re
 from datetime import datetime
 from typing import Iterable, List, Optional, Set, Tuple
 
@@ -56,12 +56,17 @@ def _normalize(values: Optional[Iterable[str]]) -> List[str]:
     debugging and stable JSON output."""
     if not values:
         return []
+    # Older job documents may store a comma-separated string, and legacy
+    # records can contain non-string entries. Normalize those safely rather
+    # than letting one malformed record fail the entire recommendation call.
+    if isinstance(values, str):
+        values = values.split(",")
     seen: Set[str] = set()
     out: List[str] = []
     for raw in values:
-        if not raw:
+        if not isinstance(raw, str) or not raw:
             continue
-        norm = raw.strip().lower()
+        norm = re.sub(r"[^a-z0-9]+", "", raw.strip().lower())
         if not norm:
             continue
         if norm in seen:
@@ -71,22 +76,18 @@ def _normalize(values: Optional[Iterable[str]]) -> List[str]:
     return out
 
 
-def _haystack(item: dict) -> str:
-    """Build a single lowercased string from an item's title, description,
-    and tags so we can do one substring check per skill."""
-    parts: List[str] = []
-    title = item.get("title")
-    if isinstance(title, str):
-        parts.append(title)
-    description = item.get("description")
-    if isinstance(description, str):
-        parts.append(description)
-    tags = item.get("tags") or []
-    if isinstance(tags, list):
-        for tag in tags:
-            if isinstance(tag, str):
-                parts.append(tag)
-    return " ".join(parts).lower()
+def _created_at_timestamp(value: object) -> float:
+    """Return a sortable timestamp, treating missing/invalid dates as oldest.
+
+    ``datetime.min.timestamp()`` can raise on some platforms. Items without a
+    creation date use that sentinel below, so convert defensively before sort.
+    """
+    if not isinstance(value, datetime):
+        return 0.0
+    try:
+        return value.timestamp()
+    except (OverflowError, OSError, ValueError):
+        return 0.0
 
 
 def _score_item(
@@ -97,16 +98,23 @@ def _score_item(
     """Return (score, matched_skills) for a single item. Score is in
     [0, 1]. Returns (0.0, []) if the item is filtered out or has no
     skill overlap."""
-    hay = _haystack(item)
+    # Recruiters enter required skills as comma-separated tags when posting
+    # jobs. Match against those explicit tags (plus legacy `skills` arrays),
+    # not arbitrary words in the title or description.
+    job_skills = set(_normalize(item.get("tags"))) | set(_normalize(item.get("skills")))
 
     if preferred_roles:
-        role_hit = any(role in hay for role in preferred_roles)
+        role_text = " ".join(
+            part for part in (item.get("title"), item.get("description"))
+            if isinstance(part, str)
+        ).lower()
+        role_hit = any(role in role_text for role in preferred_roles)
         if not role_hit:
             return 0.0, []
 
     matched: List[str] = []
     for skill in skills:
-        if skill in hay:
+        if skill in job_skills:
             matched.append(skill)
 
     if not skills:
@@ -165,7 +173,7 @@ async def recommend_jobs(
         scored.append((score, created_at, item, matched))
 
     # Highest score first; ties broken by newest created_at.
-    scored.sort(key=lambda row: (-row[0], -row[1].timestamp() if isinstance(row[1], datetime) else 0))
+    scored.sort(key=lambda row: (-row[0], -_created_at_timestamp(row[1])))
 
     top = scored[:limit]
 

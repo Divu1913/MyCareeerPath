@@ -18,8 +18,20 @@ async def read_published_items(
     size: int = Query(20, ge=1, le=100, description="Items per page"),
     search: Optional[str] = Query(None, max_length=200, description="Case-insensitive job search"),
 ):
-    """Public job feed used by the candidate jobs page."""
-    filter_query = {"is_published": True}
+    """Public job feed, limited to jobs owned by a current recruiter."""
+    recruiters = await db["users"].find(
+        {"role": {"$in": ["recruiter", "employer"]}, "is_active": {"$ne": False}},
+        {"_id": 1},
+    ).to_list(length=None)
+    owner_refs = [
+        owner_ref
+        for recruiter in recruiters
+        for owner_ref in (recruiter["_id"], str(recruiter["_id"]))
+    ]
+    if not owner_refs:
+        return {"items": [], "total": 0, "page": page, "size": size, "pages": 1}
+
+    filter_query = {"is_published": True, "owner_id": {"$in": owner_refs}}
     if search and search.strip():
         # Spaces are deliberately loose to make "Full Stack" match
         # "FullStack" as well as ordinary spaced titles. Escaping keeps user

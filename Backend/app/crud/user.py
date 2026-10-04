@@ -14,6 +14,13 @@ def _normalize_identifier(value: str) -> str:
     stripped = (value or "").strip()
     if "@" in stripped:
         return stripped.lower()
+    digits = "".join(character for character in stripped if character.isdigit())
+    if len(digits) == 12 and digits.startswith("91"):
+        return digits[2:]
+    if len(digits) == 11 and digits.startswith("0"):
+        return digits[1:]
+    if len(digits) == 10:
+        return digits
     return stripped
 
 
@@ -41,7 +48,9 @@ class CRUDUser(CRUDBase[UserInDB, UserCreate, UserCreate]):
         if "@" in normalized:
             doc = await self.get_collection(db).find_one({"email": normalized})
         else:
-            doc = await self.get_collection(db).find_one({"phone": normalized})
+            doc = await self.get_collection(db).find_one(
+                {"phone": {"$in": [normalized, f"+91{normalized}", f"91{normalized}", f"0{normalized}"]}}
+            )
         if doc:
             return self.model(**doc)
         return None

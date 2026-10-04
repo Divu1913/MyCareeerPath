@@ -16,8 +16,8 @@ class RecommendationRequest(BaseModel):
 
     Attributes:
         skills: Free-form skill tags the candidate already has. Matching is
-            case-insensitive and operates against an item's `title`,
-            `description`, and `tags` fields.
+            case-insensitive and requires an exact match with an item's
+            recruiter-posted `tags` (required skills).
         preferred_roles: Optional role/title filters (e.g. "backend engineer").
             When provided, an item must mention at least one of these
             somewhere in `title` / `description` to be considered.

@@ -19,7 +19,7 @@ export default function ForgotPasswordModal({ isOpen, onClose, initialIdentifier
 
   async function send(event) {
     event.preventDefault(); setError(""); setLoading(true);
-    try { const result = await api.sendPasswordResetOtp({ identifier }); setIdentifier(result.identifier); setDevCode(result.dev_code || ""); setStep("reset"); }
+    try { const response = await api.sendPasswordResetOtp({ identifier }); setIdentifier(response.identifier); setDevCode(response.dev_code || ""); setCode(response.dev_code || ""); setStep("reset"); }
     catch (err) { setError(err.message || "Unable to send a reset code."); }
     finally { setLoading(false); }
   }

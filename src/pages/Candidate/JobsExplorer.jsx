@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../../api.js";
+import ApplicationWizardModal from "../../components/Candidate/ApplicationWizardModal.jsx";
 
 const DEFAULT_FILTERS = { datePosted: "all", category: "all", distance: "any", workMode: "all", experience: "all" };
 
@@ -9,11 +10,14 @@ function normalizeJob(item) {
     ...item,
     id: item.id || item._id,
     company: item.company_name || item.company?.name || "Company not specified",
+    company_name: item.company_name || item.company?.name || "Company not specified",
     location: item.location || item.address || item.company_address || "Amravati",
     category: item.category || tags[0] || "Other",
     workMode: item.work_mode || item.workMode || "",
     experience: item.experience_level || item.experienceLevel || "",
     distanceKm: Number(item.distance_km ?? item.distanceKm),
+    salary: typeof item.price === "number" && item.price > 0 ? `₹${item.price.toLocaleString("en-IN")}` : "Not disclosed",
+    raw: item,
     tags,
   };
 }
@@ -25,12 +29,52 @@ function matchesDate(value, filter) {
   return age >= 0 && age <= days * 24 * 60 * 60 * 1000;
 }
 
-export default function JobsExplorer({ initialQuery = "", initialFilters = {}, onBack }) {
+export default function JobsExplorer({ initialQuery = "", initialFilters = {}, onBack, user, onSignIn }) {
   const [jobs, setJobs] = useState([]);
   const [query, setQuery] = useState(initialQuery);
   const [filters, setFilters] = useState({ ...DEFAULT_FILTERS, experience: initialFilters.experience ? initialFilters.experience.toLowerCase().startsWith("fresher") ? "fresher" : initialFilters.experience.includes("3+") ? "senior" : "mid" : "all", location: initialFilters.location || "" });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [profile, setProfile] = useState({});
+  const [appliedJobIds, setAppliedJobIds] = useState(new Set());
+  const [selectedJob, setSelectedJob] = useState(null);
+  const [applyingJobId, setApplyingJobId] = useState("");
+  const [applicationError, setApplicationError] = useState("");
+  const [applicationNotice, setApplicationNotice] = useState("");
+
+  useEffect(() => {
+    const id = user?.id || user?._id;
+    if (!id) return;
+    try {
+      setProfile(JSON.parse(localStorage.getItem(`mcp_profile_${id}`) || "{}"));
+    } catch {
+      setProfile({});
+    }
+    api.getApplications({ page: 1, size: 100 })
+      .then((data) => {
+        const applications = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
+        setAppliedJobIds(new Set(applications.map((application) => String(application?.job_id || "")).filter(Boolean)));
+      })
+      .catch(() => {});
+  }, [user?.id, user?._id]);
+
+  async function submitApplication({ cover_letter, resume_url }) {
+    if (!selectedJob) return;
+    const id = String(selectedJob.id);
+    setApplyingJobId(id);
+    setApplicationError("");
+    try {
+      await api.createApplication({ job_id: selectedJob.id, cover_letter, resume_url });
+      setAppliedJobIds((current) => new Set([...current, id]));
+      setSelectedJob(null);
+      setApplicationNotice(`Application submitted for ${selectedJob.title}.`);
+    } catch (err) {
+      setApplicationError(err?.message || "Could not submit your application. Please try again.");
+      throw err;
+    } finally {
+      setApplyingJobId("");
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -81,8 +125,9 @@ export default function JobsExplorer({ initialQuery = "", initialFilters = {}, o
           <FilterSelect label="Experience Level" value={filters.experience} onChange={updateFilter("experience")} options={[["all", "All experience levels"], ["fresher", "Fresher / Entry level"], ["mid", "Mid-level"], ["senior", "Senior"]]} />
           <fieldset className="mt-5 space-y-2"><legend className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Work Mode</legend>{[["all", "All"], ["remote", "Remote"], ["hybrid", "Hybrid"], ["on-site", "On-site"]].map(([value, label]) => <label key={value} className="flex items-center gap-2 text-sm"><input type="radio" name="jobs-work-mode" value={value} checked={filters.workMode === value} onChange={updateFilter("workMode")} />{label}</label>)}</fieldset>
         </aside>
-        <section><div className="mb-4 flex items-center justify-between"><h2 className="text-lg font-bold text-[var(--theme-navy)]">{filteredJobs.length} active listings</h2></div>{loading && <div className="rounded-2xl bg-white p-8 text-center text-sm text-slate-500">Loading active jobs...</div>}{error && <div role="alert" className="rounded-2xl bg-red-50 p-8 text-center text-sm text-red-700">{error}</div>}{!loading && !error && filteredJobs.length === 0 && <div className="rounded-2xl bg-white p-8 text-center text-sm text-slate-500">No active jobs match these filters.</div>}<div className="space-y-4">{filteredJobs.map((job) => <article key={job.id} className="rounded-2xl border border-[var(--theme-border)] bg-white p-5 shadow-sm"><div className="flex flex-wrap items-start justify-between gap-4"><div><h3 className="text-lg font-bold text-[var(--theme-navy)]">{job.title}</h3><p className="mt-1 text-sm font-semibold text-slate-600">{job.company}</p><p className="mt-2 text-sm text-slate-500">📍 {job.location}</p></div><span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">Actively hiring</span></div><p className="mt-4 line-clamp-3 text-sm leading-6 text-slate-600">{job.description || "No description provided."}</p><div className="mt-4 flex flex-wrap gap-2">{job.tags.map((tag) => <span key={tag} className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">{tag}</span>)}</div></article>)}</div></section>
+        <section><div className="mb-4 flex items-center justify-between"><h2 className="text-lg font-bold text-[var(--theme-navy)]">{filteredJobs.length} active listings</h2></div>{applicationNotice && <p role="status" className="mb-4 rounded-lg bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">{applicationNotice}</p>}{applicationError && !selectedJob && <p role="alert" className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{applicationError}</p>}{loading && <div className="rounded-2xl bg-white p-8 text-center text-sm text-slate-500">Loading active jobs...</div>}{error && <div role="alert" className="rounded-2xl bg-red-50 p-8 text-center text-sm text-red-700">{error}</div>}{!loading && !error && filteredJobs.length === 0 && <div className="rounded-2xl bg-white p-8 text-center text-sm text-slate-500">No active jobs match these filters.</div>}<div className="space-y-4">{filteredJobs.map((job) => { const isApplied = appliedJobIds.has(String(job.id)); return <article key={job.id} className="rounded-2xl border border-[var(--theme-border)] bg-white p-5 shadow-sm"><div className="flex flex-wrap items-start justify-between gap-4"><div><h3 className="text-lg font-bold text-[var(--theme-navy)]">{job.title}</h3><p className="mt-1 text-sm font-semibold text-slate-600">{job.company}</p><p className="mt-2 text-sm text-slate-500">📍 {job.location}</p></div><span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">Actively hiring</span></div><p className="mt-4 line-clamp-3 text-sm leading-6 text-slate-600">{job.description || "No description provided."}</p><div className="mt-4 flex flex-wrap gap-2">{job.tags.map((tag) => <span key={tag} className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">{tag}</span>)}</div><div className="mt-5 flex justify-end"><button type="button" onClick={() => { setApplicationError(""); setApplicationNotice(""); if (!user) { onSignIn?.(); return; } if (user.role !== "candidate") { onSignIn?.(); return; } if (!isApplied) setSelectedJob(job); }} disabled={isApplied || applyingJobId === String(job.id)} className={`rounded-lg px-5 py-2.5 text-sm font-bold text-white ${isApplied ? "cursor-not-allowed bg-emerald-600" : "bg-[var(--theme-orange)] hover:opacity-90 disabled:opacity-60"}`}>{isApplied ? "Applied" : applyingJobId === String(job.id) ? "Applying..." : "Apply now"}</button></div></article>; })}</div></section>
       </div>
+      {selectedJob && <ApplicationWizardModal job={selectedJob} profile={profile} user={user} submitting={applyingJobId === String(selectedJob.id)} error={applicationError} onSubmit={submitApplication} onClose={() => { if (!applyingJobId) setSelectedJob(null); }} />}
       <MinimalFooter />
     </main>
   );

@@ -19,10 +19,12 @@ import { Text } from 'react-native';
 const PlaceholderScreen = ({ route }) => <View className="flex-1 items-center justify-center"><Text>{route.name}</Text></View>;
 
 // --- Navigators ---
-function CandidateTabs() {
+function CandidateTabs({ user }) {
   return (
     <Tab.Navigator screenOptions={{ headerStyle: { backgroundColor: '#0F1E36' }, headerTintColor: '#fff', tabBarActiveTintColor: '#FF6B00' }}>
-      <Tab.Screen name="HomeFeed" component={CandidateHomeScreen} options={{ title: 'Jobs' }} />
+      <Tab.Screen name="HomeFeed" options={{ title: 'Jobs' }}>
+        {props => <CandidateHomeScreen {...props} user={user} />}
+      </Tab.Screen>
       <Tab.Screen name="Applied" component={PlaceholderScreen} options={{ title: 'Applied' }} />
       <Tab.Screen name="Profile" component={PlaceholderScreen} options={{ title: 'Profile' }} />
     </Tab.Navigator>
@@ -89,7 +91,9 @@ export default function AppNavigator() {
         ) : user.role === 'recruiter' ? (
           <Stack.Screen name="RecruiterRoot" component={RecruiterTabs} />
         ) : (
-          <Stack.Screen name="CandidateRoot" component={CandidateTabs} />
+          <Stack.Screen name="CandidateRoot">
+            {props => <CandidateTabs {...props} user={user} />}
+          </Stack.Screen>
         )}
       </Stack.Navigator>
     </NavigationContainer>

@@ -57,6 +57,7 @@ export const api = {
   updateJob: (itemId, data) => request(`/admin/jobs/${itemId}`, { method: 'PATCH', body: data }),
   deleteJob: (itemId) => request(`/admin/jobs/${itemId}`, { method: 'DELETE' }),
   getReports: () => request('/admin/reports'),
+  getActivityLogs: (limit = 100) => request(`/admin/activity-logs?limit=${encodeURIComponent(limit)}`),
   health: () => fetch('http://localhost:8000/health').then(async (response) => { const data = await response.json(); if (!response.ok) throw new Error(data?.detail || 'Backend health check failed'); return data }),
   clearToken: () => {
     localStorage.removeItem(TOKEN_KEY)

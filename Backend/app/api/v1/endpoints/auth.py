@@ -60,15 +60,13 @@ INDIAN_MOBILE_RE = re.compile(r"^[6-9]\d{9}$")
 
 
 def _normalize_indian_phone(digits: str) -> str | None:
-    """Strip a leading +91 / 91 / 0 from a digit-only string and return the
-    resulting 10-digit Indian mobile number, or None if the result isn't a
-    valid 10-digit number starting with 6-9.
+    """Return a valid Indian mobile number in E.164 format, or None.
 
     Accepted inputs (digit-only, after we've stripped non-digits):
-      - "9876543210"       -> "9876543210"  (already clean)
-      - "09876543210"      -> "9876543210"  (leading 0)
-      - "919876543210"     -> "9876543210"  (country code 91)
-      - "+919876543210"    -> "9876543210"  (the `+` is stripped by re.sub above)
+      - "9876543210"       -> "+919876543210"
+      - "09876543210"      -> "+919876543210"  (leading 0)
+      - "919876543210"     -> "+919876543210"  (country code 91)
+      - "+919876543210"    -> "+919876543210"  (the `+` is stripped by re.sub above)
     Anything else (e.g. "987654321" / "1234567890" / "5678901234") returns None.
     """
     if len(digits) == 13 and digits.startswith("910"):
@@ -80,7 +78,7 @@ def _normalize_indian_phone(digits: str) -> str | None:
         digits = digits[1:]
 
     if INDIAN_MOBILE_RE.match(digits):
-        return digits
+        return f"+91{digits}"
     return None
 
 
@@ -108,8 +106,16 @@ async def _find_existing_user(
     db: AsyncIOMotorDatabase, *, channel: str, identifier: str
 ) -> UserInDB | None:
     lookup_value = identifier.lower() if channel == "email" else identifier
+    phone_digits = re.sub(r"\D", "", identifier) if channel == "phone" else identifier
+    legacy_phone = phone_digits[-10:] if channel == "phone" else identifier
     doc = await db["users"].find_one(
-        {"$or": [{"email": lookup_value}, {"phone": identifier}]}
+        {"$or": [
+            {"email": lookup_value},
+            {"phone": identifier},
+            {"phone": legacy_phone},
+            {"phone": f"91{legacy_phone}"},
+            {"phone": f"0{legacy_phone}"},
+        ]}
     )
     return UserInDB(**doc) if doc else None
 
@@ -242,8 +248,8 @@ async def verify_otp(
     user = await crud_user.get_by_identifier(db, identifier=cleaned_id)
     if not user or not user.is_active:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User account is inactive or missing.",
+            status_code=status.HTTP_404_NOT_FOUND if not user else status.HTTP_400_BAD_REQUEST,
+            detail="User not found in the users collection." if not user else "User account is inactive.",
         )
 
     requested_role = otp.requested_role or payload.role
@@ -317,6 +323,7 @@ async def login(
 ):
     """Authenticate a candidate or recruiter using a password."""
     _, cleaned_id = _classify_identifier(payload.identifier)
+    expected_role = payload.role
     user = await crud_user.get_by_identifier(db, identifier=cleaned_id)
     try:
         password_match = bool(user and user.password_hash and verify_password(payload.password, user.password_hash))
@@ -325,6 +332,7 @@ async def login(
     if (
         not user
         or user.role == "admin"
+        or user.role != expected_role
         or not user.is_active
         or not password_match
     ):
@@ -351,8 +359,10 @@ async def send_password_reset_otp(
     channel, cleaned_id = _classify_identifier(payload.identifier)
     user = await crud_user.get_by_identifier(db, identifier=cleaned_id)
     if not user or user.role not in {"candidate", "recruiter"} or not user.is_active:
-        # Keep the response generic to avoid disclosing registered accounts.
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unable to send a password reset code for this account")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND if not user else status.HTTP_400_BAD_REQUEST,
+            detail="User not found in the users collection." if not user else "Password reset is not available for this account.",
+        )
     code = crud_otp.generate_code()
     await crud_otp.create_for_identifier(
         db, identifier=cleaned_id, code=code, requested_role=user.role, purpose="password_reset"
@@ -384,8 +394,10 @@ async def reset_password(
         attempts = await crud_otp.increment_attempts(db, otp=otp)
         raise HTTPException(status_code=400, detail=f"Invalid reset code. {max(0, MAX_ATTEMPTS - attempts)} attempt(s) remaining.")
     user = await crud_user.get_by_identifier(db, identifier=cleaned_id)
-    if not user or user.role not in {"candidate", "recruiter"} or not user.is_active:
-        raise HTTPException(status_code=400, detail="Password reset is not available for this account")
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found in the users collection.")
+    if user.role not in {"candidate", "recruiter"} or not user.is_active:
+        raise HTTPException(status_code=400, detail="Password reset is not available for this account.")
     await crud_otp.consume(db, otp=otp)
     await db["users"].update_one(
         {"_id": user.id},

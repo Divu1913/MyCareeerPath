@@ -101,6 +101,25 @@ def _to_application_out(doc: dict) -> ApplicationOut:
     the denormalized candidate / job fields."""
     candidate = doc.get("candidate") or {}
     job = doc.get("job") or {}
+    raw_education = candidate.get("highest_education") or candidate.get("education")
+    if isinstance(raw_education, dict):
+        education_value = raw_education.get("degree") or raw_education.get("qualification") or raw_education.get("level")
+    elif isinstance(raw_education, list):
+        education_values = [
+            entry.get("degree") or entry.get("qualification") or entry.get("level")
+            for entry in raw_education
+            if isinstance(entry, dict)
+        ]
+        education_value = ", ".join(str(value) for value in education_values if value)
+        if not education_value:
+            education_value = ", ".join(str(value) for value in raw_education if isinstance(value, str))
+    else:
+        education_value = raw_education if isinstance(raw_education, str) else None
+
+    raw_candidate_skills = candidate.get("skills") or []
+    candidate_skills = raw_candidate_skills if isinstance(raw_candidate_skills, list) else [raw_candidate_skills]
+    raw_job_skills = job.get("tags") or []
+    required_skills = raw_job_skills if isinstance(raw_job_skills, list) else [raw_job_skills]
     return ApplicationOut(
         id=doc["_id"],
         job_id=doc["job_id"],
@@ -116,19 +135,19 @@ def _to_application_out(doc: dict) -> ApplicationOut:
         candidate_phone=candidate.get("phone"),
         candidate_location=candidate.get("location"),
         candidate_headline=candidate.get("headline"),
-        candidate_skills=candidate.get("skills") or [],
+        candidate_skills=[str(value) for value in candidate_skills if value is not None],
         candidate_experience_level=candidate.get("experience_level"),
-        candidate_education=(candidate.get("highest_education") or {}).get("degree") if isinstance(candidate.get("highest_education"), dict) else candidate.get("education"),
+        candidate_education=education_value,
         candidate_portfolio_url=candidate.get("portfolio_url") or candidate.get("website"),
         candidate_certificates_url=candidate.get("certificates_url"),
         candidate_profile_photo_url=candidate.get("profile_photo_url") or candidate.get("avatar_url"),
         candidate_linkedin_url=candidate.get("linkedin_url") or candidate.get("linkedin"),
         candidate_github_url=candidate.get("github_url"),
         candidate_leetcode_url=candidate.get("leetcode_url"),
-        required_skills=job.get("tags") or [],
+        required_skills=[str(value) for value in required_skills if value is not None],
         job_title=job.get("title"),
-        created_at=doc["created_at"],
-        updated_at=doc["updated_at"],
+        created_at=doc.get("created_at") or datetime.now(timezone.utc),
+        updated_at=doc.get("updated_at") or datetime.now(timezone.utc),
     )
 
 

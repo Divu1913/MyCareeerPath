@@ -2,19 +2,30 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, FlatList, ActivityIndicator, TouchableOpacity, Alert, Image } from 'react-native';
 import { api } from '../services/api';
 
-export default function CandidateHomeScreen() {
+export default function CandidateHomeScreen({ user }) {
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [locationFilter, setLocationFilter] = useState('');
 
   useEffect(() => {
     fetchJobs();
-  }, []);
+  }, [user?.skills]);
 
   const fetchJobs = async () => {
+    const skills = Array.isArray(user?.skills) ? user.skills : [];
+    if (!skills.length) {
+      setJobs([]);
+      setLoading(false);
+      return;
+    }
     try {
-      const data = await api.getPublicJobs();
-      setJobs(data);
+      setLoading(true);
+      const data = await api.getJobRecommendations(skills);
+      setJobs((data?.recommendations || []).map(({ job, score, matched_skills }) => ({
+        ...job,
+        fitScore: Math.round((score || 0) * 100),
+        matched_skills: matched_skills || [],
+      })));
     } catch (err) {
       console.error(err);
     } finally {
@@ -36,7 +47,7 @@ export default function CandidateHomeScreen() {
           <Text className="text-sm text-gray-500">{item.company_name || item.company?.name || 'Unknown Company'}</Text>
         </View>
         <View className="bg-green-100 px-2 py-1 rounded">
-          <Text className="text-xs text-green-800 font-bold">85% Match</Text>
+          <Text className="text-xs text-green-800 font-bold">{item.fitScore}% Match</Text>
         </View>
       </View>
       <Text className="text-gray-600 mb-4" numberOfLines={2}>{item.description}</Text>
@@ -77,7 +88,7 @@ export default function CandidateHomeScreen() {
           keyExtractor={(item) => item.id.toString()}
           renderItem={renderItem}
           contentContainerStyle={{ paddingBottom: 20 }}
-          ListEmptyComponent={<Text className="text-center text-gray-500 mt-10">No jobs found.</Text>}
+          ListEmptyComponent={<Text className="text-center text-gray-500 mt-10">{user?.skills?.length ? 'No published jobs match your skills.' : 'Add skills to your profile to see matching jobs.'}</Text>}
         />
       )}
     </View>

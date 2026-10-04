@@ -169,14 +169,17 @@ async def delete_my_account(
     applications = db["applications"]
 
     if current_user.role == "recruiter":
-        job_ids = await items.distinct("_id", {"owner_id": current_user.id})
+        owner_refs = [current_user.id, str(current_user.id)]
+        job_ids = await items.distinct("_id", {"owner_id": {"$in": owner_refs}})
         if job_ids:
             await applications.delete_many({"job_id": {"$in": job_ids}})
-        await items.delete_many({"owner_id": current_user.id})
+        await items.delete_many({"owner_id": {"$in": owner_refs}})
     elif current_user.role == "candidate":
         await applications.delete_many({"candidate_id": current_user.id})
 
-    await users.delete_one({"_id": current_user.id})
+    result = await users.delete_one({"_id": current_user.id})
+    if result.deleted_count != 1:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

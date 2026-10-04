@@ -10,7 +10,7 @@ export default function Topbar({ title, subtitle, user, onLogout }) {
       <div className="top-actions">
         <label className="search">
           <IconSearch />
-          <input aria-label="Search users, jobs, tickets" placeholder="Search users, jobs, tickets..." />
+          <input aria-label="Search users, jobs, tickets" placeholder="Search users, jobs, tickets..." data-gramm="false" spellCheck="false" />
         </label>
         <div className="avatar-block">
           <div className="avatar">{(user?.full_name || user?.email || 'AD').slice(0, 2).toUpperCase()}</div>

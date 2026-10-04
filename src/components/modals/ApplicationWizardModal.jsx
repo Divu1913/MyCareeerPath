@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import {
-  EDUCATION_HIERARCHY,
   isEligible,
   normalizeQualification,
   qualificationLabel,
+  qualificationRank,
 } from "../../utils/eligibility.js";
 
 const inputCls = "mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-[var(--theme-orange)]";
@@ -18,11 +18,14 @@ function readAsDataUrl(file) {
 }
 
 function candidateQualification(profile, user) {
-  return profile?.highest_education?.degree
-    || profile?.highest_qualification
-    || profile?.education?.slice(-1)[0]?.degree
-    || user?.highest_qualification
-    || "";
+  const qualifications = [
+    profile?.highest_education?.degree,
+    profile?.highest_qualification,
+    ...(Array.isArray(profile?.education) ? profile.education.map((entry) => entry?.degree) : []),
+    user?.highest_qualification,
+  ].filter(Boolean);
+  return qualifications.reduce((highest, current) =>
+    qualificationRank(current) > qualificationRank(highest) ? current : highest, "");
 }
 
 export default function ApplicationWizardModal({ job, profile = {}, user, onSubmit, onClose, submitting = false, error = "" }) {
@@ -35,8 +38,8 @@ export default function ApplicationWizardModal({ job, profile = {}, user, onSubm
 
   const minimumQualification = job?.raw?.min_eligibility || job?.min_eligibility || "";
   const currentQualification = candidateQualification(profile, user);
-  const educationMissing = !normalizeQualification(currentQualification);
-  const educationMatches = !educationMissing && isEligible(currentQualification, minimumQualification);
+  const educationMissing = Boolean(minimumQualification) && !normalizeQualification(currentQualification);
+  const educationMatches = !minimumQualification || (!educationMissing && isEligible(currentQualification, minimumQualification));
   const existingResume = profile.resume_url || user?.resume_url || "";
 
   useEffect(() => {
@@ -111,7 +114,7 @@ export default function ApplicationWizardModal({ job, profile = {}, user, onSubm
           {step === 2 && (
             <section className="space-y-4">
               <div><h3 className="text-base font-bold text-slate-800">Verify education and background</h3><p className="mt-1 text-sm text-slate-500">Your profile qualification is checked against this job's minimum eligibility.</p></div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Your highest qualification</p><p className="mt-1 text-lg font-bold text-[var(--theme-navy)]">{qualificationLabel(currentQualification)}</p><p className="mt-3 text-xs text-slate-500">Education order: {EDUCATION_HIERARCHY.join(" → ")}</p></div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Your highest qualification</p><p className="mt-1 text-lg font-bold text-[var(--theme-navy)]">{qualificationLabel(currentQualification)}</p><p className="mt-3 text-xs text-slate-500">Education order: 10th → 12th / ITI / Diploma → Undergraduate / Graduate → Postgraduate → Doctorate</p></div>
               {educationMissing && <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-4"><p className="text-sm font-semibold text-amber-900">Education details missing. Please complete your profile education details before proceeding.</p></div>}
               {!educationMissing && <div className={`rounded-xl border p-4 ${educationMatches ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50"}`}><p className={`text-sm font-semibold ${educationMatches ? "text-emerald-800" : "text-red-800"}`}>{minimumQualification ? `Minimum required: ${qualificationLabel(minimumQualification)}` : "No minimum qualification specified"}</p><p className={`mt-1 text-xs ${educationMatches ? "text-emerald-700" : "text-red-700"}`}>{educationMatches ? "Your profile meets this requirement." : "Update your profile education before applying for this role."}</p></div>}
             </section>

@@ -22,12 +22,7 @@ import {
   GraduationCap,
 } from "lucide-react";
 
-const navItems = [
-  { label: "Services", icon: ShieldCheck },
-  { label: "Job Alerts", icon: BriefcaseBusiness },
-];
-
-export default function LandingPage({ onLogin, onRegister, onRecruiters, onExploreCategorySelect, onSearch, onDashboard, user, onProfile, onSettings, onLogout }) {
+export default function LandingPage({ onLogin, onRegister, onRecruiters, onOpenRecruiterModal, onExploreCategorySelect, onSearch, onDashboard, user, onProfile, onSettings, onLogout }) {
   const [isOpen, setIsOpen] = useState(false);
   const [roleQuery, setRoleQuery] = useState("");
   const [expLevel, setExpLevel] = useState("");
@@ -35,6 +30,11 @@ export default function LandingPage({ onLogin, onRegister, onRecruiters, onExplo
   const [activeTab, setActiveTab] = useState("category");
   const [activeCategory, setActiveCategory] = useState("Healthcare & Medical");
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [servicesOpen, setServicesOpen] = useState(false);
+  const [jobAlertsOpen, setJobAlertsOpen] = useState(false);
+  const [alertKeywords, setAlertKeywords] = useState("");
+  const [alertDistricts, setAlertDistricts] = useState("");
+  const [alertSaved, setAlertSaved] = useState(false);
   const track1Ref = useRef(null);
   const track2Ref = useRef(null);
   const exploreJobsRef = useRef(null);
@@ -42,6 +42,23 @@ export default function LandingPage({ onLogin, onRegister, onRecruiters, onExplo
   const handleCategorySelect = (categoryName) => {
     setActiveCategory(categoryName);
     onExploreCategorySelect?.(categoryName);
+  };
+
+  const handleJobAlerts = () => {
+    if (!user || user.role !== "candidate") {
+      window.location.assign("/#auth");
+      return;
+    }
+    try {
+      const saved = JSON.parse(localStorage.getItem(`mcp_job_alerts_${user.id || user._id || "candidate"}`) || "{}");
+      setAlertKeywords(saved.keywords || "");
+      setAlertDistricts(Array.isArray(saved.districts) ? saved.districts.join(", ") : "");
+    } catch {
+      setAlertKeywords("");
+      setAlertDistricts("");
+    }
+    setAlertSaved(false);
+    setJobAlertsOpen(true);
   };
 
   const exploreCategories = [
@@ -135,7 +152,11 @@ export default function LandingPage({ onLogin, onRegister, onRecruiters, onExplo
             <span className="text-[20px] font-bold leading-tight tracking-[-0.04em] sm:text-[22px]">My Career <span className="text-[#F97316]">Path</span></span>
           </a>
           <nav className="hidden flex-1 items-center gap-9 lg:flex">
-            {navItems.map(({ label, icon: Icon }) => <a key={label} href={`#${label.toLowerCase().replace(" ", "-")}`} className="flex items-center gap-2 text-base font-medium text-slate-900 transition hover:text-[#F97316]"><Icon size={20} strokeWidth={1.8} className="text-[#F97316]" />{label}</a>)}
+            <div className="relative" onMouseEnter={() => setServicesOpen(true)} onMouseLeave={() => setServicesOpen(false)}>
+              <button type="button" aria-expanded={servicesOpen} onClick={() => setServicesOpen((open) => !open)} className="flex items-center gap-2 text-base font-medium text-slate-900 transition hover:text-[#F97316]"><ShieldCheck size={20} strokeWidth={1.8} className="text-[#F97316]" />Services<ChevronDown size={16} /></button>
+              {servicesOpen && <div className="absolute left-0 top-full z-50 mt-2 w-56 rounded-xl border border-slate-200 bg-white p-2 shadow-xl">{[["Resume Tools", "/candidate/resume-tools"], ["AI Interview Prep", "/candidate/ai-prep"], ["Courses", "/courses"]].map(([name, href]) => <a key={href} href={href} className="block rounded-lg px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-orange-50 hover:text-[#F97316]">{name}</a>)}</div>}
+            </div>
+            <button type="button" onClick={handleJobAlerts} className="flex items-center gap-2 text-base font-medium text-slate-900 transition hover:text-[#F97316]"><BriefcaseBusiness size={20} strokeWidth={1.8} className="text-[#F97316]" />Job Alerts</button>
           </nav>
           <div className="hidden items-center gap-3 lg:flex">
             {user ? (
@@ -168,18 +189,16 @@ export default function LandingPage({ onLogin, onRegister, onRecruiters, onExplo
               </>
             )}
             <span className="mx-2 h-7 w-px bg-slate-300" />
-            <button type="button" onClick={onRecruiters} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3 text-base font-medium text-slate-600 transition hover:bg-slate-50">For Recruiters <ExternalLink size={17} /></button>
+            <button type="button" onClick={() => onOpenRecruiterModal?.()} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3 text-base font-medium text-slate-600 transition hover:bg-slate-50">For Recruiters <ExternalLink size={17} /></button>
           </div>
           <button onClick={() => setIsOpen(!isOpen)} className="rounded-lg p-2 text-slate-800 hover:bg-orange-50 lg:hidden" aria-label="Toggle navigation" aria-expanded={isOpen}>{isOpen ? <X size={25} /> : <Menu size={25} />}</button>
         </div>
         {isOpen && (
           <div className="border-t border-slate-200 bg-[#fffdf5] px-6 py-4 lg:hidden">
             <nav className="mx-auto flex max-w-7xl flex-col gap-1">
-              {navItems.map(({ label, icon: Icon }) => (
-                <a key={label} href="#home" onClick={() => setIsOpen(false)} className="flex items-center gap-3 rounded-lg px-3 py-3 font-medium text-slate-800 hover:bg-orange-50">
-                  <Icon size={19} className="text-[#F97316]" />{label}
-                </a>
-              ))}
+              <button type="button" onClick={() => setServicesOpen((open) => !open)} aria-expanded={servicesOpen} className="flex items-center justify-between rounded-lg px-3 py-3 text-left font-medium text-slate-800 hover:bg-orange-50"><span className="flex items-center gap-3"><ShieldCheck size={19} className="text-[#F97316]" />Services</span><ChevronDown size={16} /></button>
+              {servicesOpen && <div className="ml-8 flex flex-col">{[["Resume Tools", "/candidate/resume-tools"], ["AI Interview Prep", "/candidate/ai-prep"], ["Courses", "/courses"]].map(([name, href]) => <a key={href} href={href} onClick={() => setIsOpen(false)} className="rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-orange-50">{name}</a>)}</div>}
+              <button type="button" onClick={() => { setIsOpen(false); handleJobAlerts(); }} className="flex items-center gap-3 rounded-lg px-3 py-3 text-left font-medium text-slate-800 hover:bg-orange-50"><BriefcaseBusiness size={19} className="text-[#F97316]" />Job Alerts</button>
               <div className="mt-3 flex flex-col gap-3 border-t border-slate-200 pt-4">
                 {user ? (
                   <div className="flex items-center justify-between gap-3">
@@ -335,13 +354,14 @@ export default function LandingPage({ onLogin, onRegister, onRecruiters, onExplo
                <button onClick={() => setIsChatOpen(true)} className="inline-block bg-[#0B8457] text-white font-bold text-base tracking-wide px-6 py-3 rounded-lg hover:bg-[#096b47] transition">10505</button>
             </div>
             <div className="w-[560px] max-w-full flex-shrink-0">
-              <img src="/profile.webp" alt="Support representative" className="w-full h-auto block rounded-2xl" />
+              <img src="https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&q=80&w=400" alt="Support representative" className="w-44 h-auto object-contain rounded-xl" />
             </div>
           </div>
         </section>
 
         <ChatDialog isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} userRole="user" />
       </div>
+      {jobAlertsOpen && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 p-4" onMouseDown={() => setJobAlertsOpen(false)}><section role="dialog" aria-modal="true" aria-labelledby="job-alert-title" className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl" onMouseDown={(event) => event.stopPropagation()}><div className="mb-5 flex items-start justify-between"><div><p className="text-xs font-bold uppercase tracking-wider text-[#F97316]">Candidate preferences</p><h2 id="job-alert-title" className="mt-1 text-xl font-bold text-[#1E3A8A]">Configure Free Job Alerts</h2></div><button type="button" onClick={() => setJobAlertsOpen(false)} aria-label="Close job alerts" className="rounded px-2 text-xl text-slate-500 hover:bg-slate-100">×</button></div>{alertSaved ? <p role="status" className="rounded-xl bg-emerald-50 p-4 font-semibold text-emerald-800">Your job alert preferences have been saved.</p> : <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); const preferences = { keywords: alertKeywords.trim(), districts: alertDistricts.split(",").map((district) => district.trim()).filter(Boolean) }; localStorage.setItem(`mcp_job_alerts_${user?.id || user?._id || "candidate"}`, JSON.stringify(preferences)); setAlertSaved(true); }}><label className="block text-sm font-semibold text-slate-700">Role keywords<input required value={alertKeywords} onChange={(event) => setAlertKeywords(event.target.value)} placeholder="e.g. Accountant, Python developer" className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2.5" /></label><label className="block text-sm font-semibold text-slate-700">Target district locations<input required value={alertDistricts} onChange={(event) => setAlertDistricts(event.target.value)} placeholder="e.g. Amravati, Nagpur" className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2.5" /><span className="mt-1 block text-xs font-normal text-slate-500">Separate multiple districts with commas.</span></label><button className="w-full rounded-xl bg-[#1E3A8A] py-3 font-bold text-white hover:bg-[#16306f]">Save alert preferences</button></form>}</section></div>}
     </main>
   );
 }

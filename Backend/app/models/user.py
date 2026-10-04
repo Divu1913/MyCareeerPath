@@ -32,6 +32,7 @@ class UserInDB(BaseMongoModel):
     role: str = "user"  # "user", "admin", "manager"
     location: Optional[str] = None
     linkedin: Optional[str] = None
+    github: Optional[str] = None
     website: Optional[str] = None
     headline: Optional[str] = None
     avatar_url: Optional[str] = None

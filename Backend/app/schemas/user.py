@@ -23,6 +23,7 @@ class UserBase(BaseModel):
     role: Optional[str] = "user"
     location: Optional[str] = None
     linkedin: Optional[str] = None
+    github: Optional[str] = None
     website: Optional[str] = None
     headline: Optional[str] = None
     avatar_url: Optional[str] = None
@@ -50,6 +51,7 @@ class PasswordRegisterRequest(BaseModel):
 class PasswordLoginRequest(BaseModel):
     identifier: str = Field(..., min_length=3, max_length=254)
     password: str = Field(..., min_length=1, max_length=128)
+    role: Literal["candidate", "recruiter"] = "candidate"
 
 
 class Certification(BaseModel):
@@ -89,6 +91,7 @@ class UserUpdate(BaseModel):
     role: Optional[str] = None
     location: Optional[str] = None
     linkedin: Optional[str] = None
+    github: Optional[str] = None
     website: Optional[str] = None
     headline: Optional[str] = None
     avatar_url: Optional[str] = None

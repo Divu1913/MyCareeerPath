@@ -60,16 +60,6 @@ except Exception:
     # If settings parsing ever blows up, the explicit defaults above still apply.
     pass
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=CORS_ALLOWED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-    max_age=600,
-)
-
 # Include v1 API Router under configured prefix and explicitly under /api/v1
 app.include_router(api_router, prefix=settings.API_V1_STR)
 if settings.API_V1_STR != "/api/v1":
@@ -84,3 +74,17 @@ async def health_check():
         "service": settings.PROJECT_NAME,
         "version": settings.VERSION,
     }
+
+
+# Wrap the complete FastAPI application so CORS headers are also present on
+# unhandled error responses. Otherwise browsers hide the backend's real 500
+# response and report only a misleading CORS failure.
+app = CORSMiddleware(
+    app=app,
+    allow_origins=CORS_ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=600,
+)

@@ -3,14 +3,7 @@ import { api } from "../../api.js";
 import ProfileDropdown from "../../components/ProfileDropdown.jsx";
 import NotificationBell from "../../components/NotificationBell.jsx";
 import ApplicationWizardModal from "../../components/Candidate/ApplicationWizardModal.jsx";
-import { meetsMinimumQualification, qualificationLabel } from "../../utils/eligibility.js";
-
-// Fit-score is a placeholder until /api/recommendations/jobs is wired up
-// on this page (the endpoint already exists on the backend, but rendering
-// personalised scores here requires the candidate's full profile in the
-// request body). Every live item gets the same baseline for now, but the
-// shape is in place — swap to real scores once recommendations call lands.
-const BASELINE_FIT_SCORE = 80;
+import { meetsMinimumQualification, qualificationLabel, qualificationRank } from "../../utils/eligibility.js";
 
 // Format an ISO date as a short relative ("3 days ago") or absolute string.
 // Mirrors the existing UI copy on the candidate dashboard.
@@ -49,7 +42,6 @@ function shapeItemForFeed(item) {
     min_eligibility: item.min_eligibility || "",
     distanceKm: Number(item.distance_km ?? item.distanceKm),
     badges: tags.length > 0 ? tags.slice(0, 3) : ["New"],
-    fitScore: BASELINE_FIT_SCORE,
     salary:
       typeof item.price === "number" && item.price > 0
         ? `₹${item.price.toLocaleString("en-IN")}`
@@ -107,14 +99,15 @@ export default function CandidateDashboard({ user, initialSearch = {}, onProfile
   const [jobsLoading, setJobsLoading] = useState(true);
   const [jobsError, setJobsError] = useState("");
 
-  // Load candidate's local profile + application count, then fetch the live
-  // public job feed. The two requests are independent and run in parallel;
+  // Load the candidate's local profile and application count alongside the
+  // complete public jobs feed. The requests run independently;
   // profile fetch errors are non-fatal (the dashboard still works without
   // them) but a feed failure surfaces inline so the candidate knows.
   useEffect(() => {
     let cancelled = false;
+    let jobsRequestVersion = 0;
 
-    // Load local storage profile data
+    // Load local profile data for the profile widgets and application flow.
     try {
       const stored = JSON.parse(localStorage.getItem(`mcp_profile_${userId}`) || "{}");
       setProfile(stored);
@@ -138,28 +131,33 @@ export default function CandidateDashboard({ user, initialSearch = {}, onProfile
       // failure avoids overwriting a Quick Apply success that finishes first.
       .catch(() => {});
 
-    // Fetch live published jobs. `getPublicJobs` calls GET /api/items/public
-    // (no auth required, returns paginated payload). We request the max
-    // page size so the candidate sees every active posting on first load.
-    setJobsLoading(true);
-    setJobsError("");
-    api.getPublicJobs({ page: 1, size: 100 })
+    // Reload when the tab regains focus so deletions from the recruiter/admin
+    // workspace are reflected without requiring a full page reload.
+    const loadPublishedJobs = () => {
+      const requestVersion = ++jobsRequestVersion;
+      setJobsLoading(true);
+      setJobsError("");
+      api.getPublicJobs({ page: 1, size: 100 })
       .then((data) => {
-        if (cancelled) return;
-        const items = Array.isArray(data?.items) ? data.items : [];
-        setJobs(items.map(shapeItemForFeed));
+        if (cancelled || requestVersion !== jobsRequestVersion) return;
+        const postedJobs = Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []);
+        setJobs(postedJobs.map((job) => shapeItemForFeed(job)));
       })
       .catch((err) => {
-        if (cancelled) return;
+        if (cancelled || requestVersion !== jobsRequestVersion) return;
         setJobsError(err?.message || "Failed to load jobs");
         setJobs([]);
       })
       .finally(() => {
-        if (!cancelled) setJobsLoading(false);
+        if (!cancelled && requestVersion === jobsRequestVersion) setJobsLoading(false);
       });
+    };
+    loadPublishedJobs();
+    window.addEventListener("focus", loadPublishedJobs);
 
     return () => {
       cancelled = true;
+      window.removeEventListener("focus", loadPublishedJobs);
     };
   }, [userId]);
 
@@ -213,6 +211,16 @@ export default function CandidateDashboard({ user, initialSearch = {}, onProfile
   // Apply only the submitted query. A direct, case-insensitive substring
   // search makes the result predictable across title, company, description,
   // and individual skill/tag values.
+  const candidateQualifications = [
+    profile.highest_education?.degree,
+    profile.highest_qualification,
+    ...(Array.isArray(profile.education) ? profile.education.map((entry) => entry?.degree) : []),
+    user?.highest_qualification,
+  ].filter(Boolean);
+  const candidateQualification = candidateQualifications.reduce((highest, current) =>
+    qualificationRank(current) > qualificationRank(highest) ? current : highest, "");
+  const candidateHasEducation = qualificationRank(candidateQualification) >= 0;
+
   const filteredJobs = jobs.filter(job => {
     const q = activeSearchQuery.toLowerCase().trim();
     const searchableFields = [
@@ -245,12 +253,12 @@ export default function CandidateDashboard({ user, initialSearch = {}, onProfile
 
     const matchesDistance = distance === "any" ||
       (Number.isFinite(job.distanceKm) && job.distanceKm <= Number(distance));
-    const candidateQualification = profile.highest_education?.degree || profile.highest_qualification || profile.education?.slice(-1)[0]?.degree || user?.highest_qualification || "";
-    const matchesEligibility = !job.min_eligibility || !candidateQualification || meetsMinimumQualification(candidateQualification, job.min_eligibility);
+    // A stated minimum requires known candidate education. Jobs without a
+    // minimum remain visible to candidates whose education is unspecified.
+    const matchesEligibility = !job.min_eligibility || meetsMinimumQualification(candidateQualification, job.min_eligibility);
 
     return matchesSearch && matchesLocation && matchesDate && matchesDistance && matchesMode && matchesExperience && matchesEligibility;
   });
-
   return (
     <div className="min-h-screen bg-[var(--theme-cream)] text-slate-800 flex flex-col">
       
@@ -426,13 +434,13 @@ export default function CandidateDashboard({ user, initialSearch = {}, onProfile
           </div>
         </aside>
 
-        {/* ── Center Job Match Cards (2 Cols) ──────────────────────────────── */}
+        {/* ── Center Job Cards (2 Cols) ───────────────────────────────────── */}
         <section className="lg:col-span-2 space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold text-[var(--theme-navy)]">
-              Recommended for You ({filteredJobs.length})
+              Eligible Jobs ({filteredJobs.length})
             </h2>
-            <span className="text-xs text-slate-500">Live feed</span>
+            <span className="text-xs text-slate-500">Filtered by your education and selected filters</span>
           </div>
 
           {applyError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{applyError}</p>}
@@ -449,9 +457,12 @@ export default function CandidateDashboard({ user, initialSearch = {}, onProfile
             </div>
           ) : filteredJobs.length === 0 ? (
             <div className="p-8 text-center bg-white rounded-xl shadow-sm border border-slate-100">
-              <h3 className="text-lg font-semibold text-slate-800">No matching jobs found</h3>
-              <p className="text-sm text-slate-500 mt-1">Try resetting your filters or search keywords.</p>
-              <button type="button" onClick={handleResetFilters} className="mt-4 px-4 py-2 bg-orange-500 text-white rounded-lg text-sm font-medium">Clear Filters &amp; Search</button>
+              <h3 className="text-lg font-semibold text-slate-800">{candidateHasEducation ? "No jobs meet your education and current filters" : "Add your education to see eligible jobs"}</h3>
+              <p className="text-sm text-slate-500 mt-1">{candidateHasEducation ? "Jobs with minimum education requirements are shown when your profile meets them. Clear filters to broaden your results." : "Jobs with a minimum education requirement are hidden until you add your education to your profile."}</p>
+              <div className="mt-4 flex justify-center gap-3">
+                <button type="button" onClick={handleResetFilters} className="px-4 py-2 bg-orange-500 text-white rounded-lg text-sm font-medium">Clear Filters &amp; Search</button>
+                {!candidateHasEducation && <button type="button" onClick={onProfileClick} className="px-4 py-2 bg-slate-800 text-white rounded-lg text-sm font-medium">Add Education</button>}
+              </div>
             </div>
           ) : (
             filteredJobs.map((job) => {
@@ -486,16 +497,6 @@ export default function CandidateDashboard({ user, initialSearch = {}, onProfile
                     ))}
                     {job.min_eligibility && <span className="text-[10px] bg-blue-50 text-blue-700 px-2.5 py-0.5 rounded-full font-medium">Education: {qualificationLabel(job.min_eligibility)}</span>}
                   </div>
-                </div>
-
-                {/* Circular Fit Score Badge */}
-                <div className="flex flex-col items-center justify-center shrink-0">
-                  <div className="relative h-14 w-14 rounded-full border-4 border-blue-100 flex items-center justify-center bg-blue-50/20">
-                    <span className="text-sm font-black text-blue-600">{job.fitScore}%</span>
-                    {/* Ring background track */}
-                    <div className="absolute inset-0 rounded-full border-4 border-blue-500 border-t-transparent animate-spin-slow opacity-20 pointer-events-none" />
-                  </div>
-                  <span className="text-[10px] text-slate-400 font-bold uppercase mt-1">Fit Match</span>
                 </div>
 
                 {/* Apply Button */}

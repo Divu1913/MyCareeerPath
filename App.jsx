@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import "./theme.css";
 import LandingPage from "./LandingPage";
 import JobsPage from "./JobsPage";
@@ -12,6 +13,7 @@ import ApplicationsEmployeeDashboard from "./src/pages/Recruiter/ApplicationsEmp
 import ReportsEmployeeDashboard from "./src/pages/Recruiter/ReportsEmployeeDashboard";
 import SettingsEmployeeDashboard from "./src/pages/Recruiter/SettingsEmployeeDashboard";
 import RecruiterOnboarding from "./src/pages/Recruiter/RecruiterOnboarding";
+import RecruiterRegistration from "./src/pages/Recruiter/RecruiterRegistration";
 import LoggedOut from "./src/pages/Recruiter/LoggedOut";
 import UserProfile from "./src/pages/Candidate/UserProfile";
 import CandidateOnboarding from "./src/pages/Candidate/CandidateOnboarding";
@@ -21,12 +23,27 @@ import AccountSettings from "./src/pages/Candidate/AccountSettings";
 import ProfileDropdown from "./src/components/ProfileDropdown";
 import AdminLoginModal from "./src/components/AdminLoginModal";
 import LandingFooter from "./src/components/Footer";
+import RecruiterModal from "./src/components/RecruiterModal.jsx";
+import About from "./src/pages/About.jsx";
+import Contact from "./src/pages/Contact.jsx";
+import FraudAlert from "./src/pages/FraudAlert.jsx";
+import Terms from "./src/pages/Terms.jsx";
+import PrivacyPolicy from "./src/pages/PrivacyPolicy.jsx";
+import CookiePolicy from "./src/pages/CookiePolicy.jsx";
+import Disclaimers from "./src/pages/Disclaimers.jsx";
+import ReportJob from "./src/pages/ReportJob.jsx";
+import Courses from "./src/pages/Courses.jsx";
+import BusinessNews from "./src/pages/BusinessNews.jsx";
+import EmployerGuidelines from "./src/pages/EmployerGuidelines.jsx";
+import CandidateTools from "./src/pages/CandidateTools.jsx";
+import JobAlert from "./src/pages/JobAlert.jsx";
 // Admin dashboard components
 import AdminSidebar from "./mycareerpath-admin/src/components/Sidebar.jsx";
 import AdminTopbar from "./mycareerpath-admin/src/components/Topbar.jsx";
 import AdminDashboard from "./mycareerpath-admin/src/views/Dashboard.jsx";
 import AdminUsers from "./mycareerpath-admin/src/views/Users.jsx";
 import AdminApprovals from "./mycareerpath-admin/src/views/Approvals.jsx";
+import RecruiterEnquiriesTable from "./mycareerpath-admin/src/views/RecruiterEnquiriesTable.jsx";
 import AdminJobs from "./mycareerpath-admin/src/views/Jobs.jsx";
 import AdminActivity from "./mycareerpath-admin/src/views/Activity.jsx";
 import AdminReports from "./mycareerpath-admin/src/views/Reports.jsx";
@@ -35,7 +52,7 @@ import "./mycareerpath-admin/src/App.css";
 import { Bell, BriefcaseBusiness, FileText, LayoutDashboard, Plus, Settings, Users, BarChart3, CalendarDays } from "lucide-react";
 
 
-// Top-level page state. No router yet — matches the existing minimal style.
+// Top-level shell state for dashboard and legacy hash destinations.
 // `page` is the top-level shell (landing | jobs | auth | dashboard | logged-out).
 // `recruiterView` is the sub-page once the user is on the dashboard:
 //   overview | post-job | manage-jobs | applications | reports | settings.
@@ -52,6 +69,7 @@ const ADMIN_VIEWS = {
   "dashboard": AdminDashboard,
   "users": AdminUsers,
   "approvals": AdminApprovals,
+  "enquiries": RecruiterEnquiriesTable,
   "jobs": AdminJobs,
   "activity": AdminActivity,
   "reports": AdminReports,
@@ -76,12 +94,15 @@ const RECRUITER_TOP_NAV = [
 ];
 
 export default function App() {
+  const location = useLocation();
+  const navigate = useNavigate();
   // Default page is ALWAYS "landing" on mount. The app never force-redirects
   // a visitor (logged in or not) to onboarding or dashboard without explicit
   // user action. Brand logo / "Back to Home" links should reset `page` to
   // "landing" via the `goHome` helper below.
   const [page, setPageState] = useState("landing"); // landing | jobs | auth | dashboard | logged-out | candidate-settings
   const [user, setUser] = useState(null);
+  const [authResolved, setAuthResolved] = useState(false);
   const [authMode, setAuthMode] = useState("signin");
   const [authRole, setAuthRole] = useState("candidate");
   const [recruiterView, setRecruiterViewState] = useState("overview");
@@ -97,6 +118,7 @@ export default function App() {
   // so its conversation history survives the toggle.
   const [chatOpen, setChatOpen] = useState(false);
   const [showAdminLogin, setShowAdminLogin] = useState(false);
+  const [showRecruiterModal, setShowRecruiterModal] = useState(false);
   // Mirror of the latest `me` payload, kept in a ref so synchronous
   // event-handler closures (e.g. LandingPage's "Go to Dashboard" button
   // clicked before React re-renders) always read the freshest profile
@@ -113,6 +135,10 @@ export default function App() {
 
   function setPage(nextPage) {
     setPageState(nextPage);
+    if (location.pathname !== "/") {
+      navigate(`/${routeHash(nextPage)}`);
+      return;
+    }
     if (nextPage === page) return;
     if (window.location.hash !== routeHash(nextPage)) {
       window.history.pushState(null, "", routeHash(nextPage));
@@ -230,9 +256,26 @@ export default function App() {
 
   // On mount, restore the role-appropriate authenticated view after a hard refresh.
   useEffect(() => {
+    const handleUnauthorized = () => {
+      const role = meRef.current?.role === "recruiter" ? "recruiter" : "candidate";
+      auth.clear();
+      setUser(null);
+      meRef.current = null;
+      setAuthMode("signin");
+      setAuthRole(role);
+      setPage("auth");
+    };
+    window.addEventListener("mcp:unauthorized", handleUnauthorized);
+    return () => window.removeEventListener("mcp:unauthorized", handleUnauthorized);
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     async function loadUser() {
-      if (!auth.isAuthenticated()) return;
+      if (!auth.isAuthenticated()) {
+        if (!cancelled) setAuthResolved(true);
+        return;
+      }
       try {
         const me = await api.me();
         if (!cancelled) {
@@ -241,11 +284,17 @@ export default function App() {
           // `onDashboard` on LandingPage) read the freshest payload
           // even before the next render flushes `user` state.
           meRef.current = me;
-          setPage(destinationForUser(me));
+          if (location.pathname === "/") setPage(destinationForUser(me));
         }
       } catch {
         // Token invalid — clear and stay logged out.
         auth.clear();
+        if (!cancelled) {
+          setUser(null);
+          meRef.current = null;
+        }
+      } finally {
+        if (!cancelled) setAuthResolved(true);
       }
     }
     loadUser();
@@ -268,6 +317,10 @@ export default function App() {
         if (parts[1] === "recruiter" && parts[2]) setRecruiterViewState(parts[2]);
         return;
       }
+      if (parts[0] === "auth") {
+        setAuthMode("signin");
+        setAuthRole("candidate");
+      }
       setPageState(parts[0]);
     };
 
@@ -279,6 +332,35 @@ export default function App() {
       window.removeEventListener("hashchange", syncHistory);
     };
   }, []);
+
+  // Expire authenticated sessions after 30 minutes without user activity.
+  useEffect(() => {
+    if (!user || !auth.getAccessToken()) return undefined;
+
+    const SESSION_IDLE_LIMIT_MS = 30 * 60 * 1000;
+    let inactivityTimer;
+    const expireSession = () => {
+      // Wipe all auth state from storage so ProtectedRoute guards see no token.
+      localStorage.clear();
+      alert(
+        "Your session has expired due to 30 minutes of inactivity. Redirecting to home page."
+      );
+      // Hard redirect — fully unmounts dashboard components and resets all state.
+      window.location.href = "/#landing";
+    };
+    const resetInactivityTimer = () => {
+      window.clearTimeout(inactivityTimer);
+      inactivityTimer = window.setTimeout(expireSession, SESSION_IDLE_LIMIT_MS);
+    };
+    const activityEvents = ["mousemove", "keydown", "click", "scroll"];
+
+    resetInactivityTimer();
+    activityEvents.forEach((eventName) => window.addEventListener(eventName, resetInactivityTimer, { passive: true }));
+    return () => {
+      window.clearTimeout(inactivityTimer);
+      activityEvents.forEach((eventName) => window.removeEventListener(eventName, resetInactivityTimer));
+    };
+  }, [user]);
 
   function handleAuthSuccess() {
     setRecruiterView("overview");
@@ -294,6 +376,8 @@ export default function App() {
     api.me().then((me) => {
       setUser(me);
       meRef.current = me;
+      // Persist user object so ProtectedRoute can read the role from localStorage.
+      localStorage.setItem("user", JSON.stringify(me));
       setPage(destinationForUser(me));
     }).catch(() => setPage("landing"));
   }
@@ -318,6 +402,14 @@ export default function App() {
     setAuthMode(mode);
     setAuthRole(role);
     setPage("auth");
+  }
+
+  function openRecruiterRegistration() {
+    setPage("recruiter-registration");
+  }
+
+  function goToPostJob() {
+    navigate("/post-job");
   }
 
   function handleRecruiterNav(view, filter = "") {
@@ -400,6 +492,67 @@ export default function App() {
     </>
   );
 
+  const publicPageByPath = {
+    "/about": About,
+    "/contact": Contact,
+    "/fraud-alert": FraudAlert,
+    "/terms": Terms,
+    "/privacy-policy": PrivacyPolicy,
+    "/cookie-policy": CookiePolicy,
+    "/disclaimers": Disclaimers,
+    "/courses": Courses,
+    "/business-news": BusinessNews,
+    "/employer-guidelines": EmployerGuidelines,
+  };
+  const StaticPage = publicPageByPath[location.pathname];
+  if (StaticPage) {
+    return <><StaticPage /><LandingFooter onOpenAdminModal={() => setShowAdminLogin(true)} onOpenRecruiterModal={() => setShowRecruiterModal(true)} onPostJob={goToPostJob} /><AdminLoginModal isOpen={showAdminLogin} onClose={() => setShowAdminLogin(false)} onSuccess={handleAuthSuccess} />{showRecruiterModal && <RecruiterModal onClose={() => setShowRecruiterModal(false)} onSuccess={handleAuthSuccess} />}{chrome}</>;
+  }
+
+  if (location.pathname === "/report-job") {
+    if (auth.isAuthenticated() && !user && !authResolved) return <div className="p-10 text-center text-slate-600">Loading your account…</div>;
+    return <><ReportJob currentUser={user} /><LandingFooter onOpenAdminModal={() => setShowAdminLogin(true)} onOpenRecruiterModal={() => setShowRecruiterModal(true)} onPostJob={goToPostJob} /><AdminLoginModal isOpen={showAdminLogin} onClose={() => setShowAdminLogin(false)} onSuccess={handleAuthSuccess} />{showRecruiterModal && <RecruiterModal onClose={() => setShowRecruiterModal(false)} onSuccess={handleAuthSuccess} />}{chrome}</>;
+  }
+
+  if (location.pathname === "/candidate/resume-tools" || location.pathname === "/candidate/ai-prep") {
+    if (auth.isAuthenticated() && !user && !authResolved) return <div className="p-10 text-center text-slate-600">Loading your account…</div>;
+    if (!user || user.role !== "candidate") return <Navigate to="/#auth" replace />;
+    const kind = location.pathname.endsWith("resume-tools") ? "resume" : "ai-prep";
+    return <><CandidateTools kind={kind} />{chrome}</>;
+  }
+
+  if (location.pathname === "/jobs") {
+    if (!auth.isAuthenticated()) return <Navigate to="/#auth" replace />;
+    if (!user) return <div className="p-10 text-center text-slate-600">Loading your account…</div>;
+    if (location.search.includes("alert=true")) {
+      if (user.role !== "candidate") return <Navigate to="/#auth" replace />;
+      return <><JobAlert />{chrome}</>;
+    }
+    if (user.role === "candidate") return <Navigate to="/#candidate-dashboard" replace />;
+    return <><JobsExplorer initialQuery={jobSearch.role} initialFilters={{ experience: jobSearch.experience, location: jobSearch.location }} onBack={() => navigate("/#auth")} />{chrome}</>;
+  }
+
+  if (location.pathname === "/recruiter/overview") {
+    if (auth.isAuthenticated() && !user && !authResolved) return <div className="p-10 text-center text-slate-600">Loading your account…</div>;
+    if (user?.role === "recruiter") return <Navigate to="/#dashboard/recruiter/overview" replace />;
+    if (user?.role === "admin") return <Navigate to="/#dashboard/admin/dashboard" replace />;
+    return <Navigate to="/#recruiter-registration" replace />;
+  }
+
+  if (location.pathname === "/post-job") {
+    if (auth.isAuthenticated() && !user && !authResolved) return <div className="p-10 text-center text-slate-600">Loading your account…</div>;
+    if (user?.role === "recruiter") return <Navigate to="/#dashboard/recruiter/post-job" replace />;
+    return <Navigate to="/#auth" replace state={{ authRole: "recruiter" }} />;
+  }
+
+  if (page === "recruiter-registration")
+    return (
+      <>
+        <RecruiterRegistration onSuccess={handleAuthSuccess} onHome={goHome} />
+        {chrome}
+      </>
+    );
+
   if (page === "auth")
     return (
       <>
@@ -407,7 +560,8 @@ export default function App() {
           onSuccess={handleAuthSuccess}
           onHome={goHome}
           initialMode={authMode}
-          initialRole={authRole}
+          initialRole={location.state?.authRole || authRole}
+          notice={location.state?.authNotice || ""}
         />
         {chrome}
       </>
@@ -420,6 +574,8 @@ export default function App() {
         <JobsExplorer
           initialQuery={jobSearch.role}
           initialFilters={{ experience: jobSearch.experience, location: jobSearch.location }}
+          user={user}
+          onSignIn={() => openAuth("signin", "candidate")}
           onBack={() => setPage(user ? destinationForUser(user) : "landing")}
         />
         {chrome}
@@ -478,6 +634,16 @@ export default function App() {
         {chrome}
       </>
     );
+
+  // Candidate dashboard routes require a restored candidate session. Hash
+  // routes can be opened directly, so do not let them mount protected screens
+  // while the token is missing or invalid.
+  if (page === "candidate-dashboard") {
+    if (!authResolved) return <div className="p-10 text-center text-slate-600">Loading your account...</div>;
+    if (!user || user.role !== "candidate") {
+      return <Navigate to="/#auth" replace state={{ authRole: "candidate", authNotice: "Please sign in to view your candidate dashboard." }} />;
+    }
+  }
 
   // Candidate dashboard
   if (page === "candidate-dashboard")
@@ -669,7 +835,7 @@ export default function App() {
       <LandingPage
         onLogin={() => openAuth("signin")}
         onRegister={() => openAuth("signup")}
-        onRecruiters={() => openAuth("signin", "recruiter")}
+        onRecruiters={openRecruiterRegistration}
         onExploreCategorySelect={() => setPage("jobs")}
         onSearch={(criteria) => { setJobSearch(criteria); setPage(user?.role === "candidate" ? "candidate-dashboard" : "jobs"); }}
         user={user}
@@ -678,8 +844,10 @@ export default function App() {
         onSettings={() => openSettingsForUser(user)}
         onLogout={handleLogout}
         onOpenAdminLogin={() => setShowAdminLogin(true)}
+        onOpenRecruiterModal={() => setShowRecruiterModal(true)}
       />
-      <LandingFooter onOpenAdminLogin={() => setShowAdminLogin(true)} />
+      <LandingFooter onOpenAdminModal={() => setShowAdminLogin(true)} onOpenRecruiterModal={() => setShowRecruiterModal(true)} onPostJob={goToPostJob} />
+      {showRecruiterModal && <RecruiterModal onClose={() => setShowRecruiterModal(false)} onSuccess={handleAuthSuccess} />}
       <AdminLoginModal
         isOpen={showAdminLogin}
         onClose={() => setShowAdminLogin(false)}

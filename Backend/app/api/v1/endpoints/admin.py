@@ -11,6 +11,7 @@ from urllib.parse import quote
 
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, status, Body
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import Response
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel, Field, model_validator
@@ -22,6 +23,7 @@ from app.models.user import UserInDB
 from app.schemas.item import ItemUpdate
 from app.schemas.user import UserOut
 from app.schemas.otp import VerifyOtpResponse
+from app.schemas.recruiter import SalesEnquiryStatusUpdate
 
 router = APIRouter()
 
@@ -46,6 +48,11 @@ class AdminLoginRequest(BaseModel):
 
 class AdminForgotPasswordRequest(BaseModel):
     email: str = Field(..., min_length=3, max_length=254)
+
+
+def _serialize_sales_enquiry(enquiry: dict[str, Any]) -> dict[str, Any]:
+    """Convert Mongo's ObjectId into a JSON-compatible string."""
+    return {**enquiry, "_id": str(enquiry["_id"])}
 
 
 def _configured_admin_matches(identifier: str) -> bool:
@@ -181,6 +188,87 @@ async def _monthly_counts(collection, field: str, first_month: datetime, buckets
     return [{"month": month.strftime("%Y-%m"), "count": counts.get(month.strftime("%Y-%m"), 0)} for month in buckets]
 
 
+@router.get("/sales-enquiries")
+async def get_sales_enquiries(
+    enquiry_status: Optional[Literal["pending", "contacted", "resolved"]] = Query(default=None, alias="status"),
+    db: AsyncIOMotorDatabase = Depends(deps.get_db),
+    _: UserInDB = Depends(deps.get_current_admin_user),
+):
+    """List up to 100 callback requests, optionally filtered by workflow status."""
+    query = {"status": enquiry_status} if enquiry_status else {}
+    enquiries = await db["sales_enquiries"].find(query).sort("_id", -1).to_list(length=100)
+    serialized = [_serialize_sales_enquiry(enquiry) for enquiry in enquiries]
+    return {"success": True, "count": len(serialized), "enquiries": serialized}
+
+
+@router.patch("/sales-enquiries/{enquiry_id}/status")
+async def update_enquiry_status(
+    enquiry_id: str,
+    status_update: SalesEnquiryStatusUpdate,
+    db: AsyncIOMotorDatabase = Depends(deps.get_db),
+    _: UserInDB = Depends(deps.get_current_admin_user),
+):
+    """Set a callback request's workflow status."""
+    object_id = _object_id(enquiry_id, "sales enquiry")
+    enquiry = await db["sales_enquiries"].find_one({"_id": object_id})
+    if not enquiry:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Enquiry not found")
+    if enquiry.get("status", "pending") in {"contacted", "resolved", "approved"}:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This enquiry status is locked")
+    result = await db["sales_enquiries"].update_one(
+        {"_id": object_id, "status": {"$nin": ["contacted", "resolved", "approved"]}},
+        {"$set": {"status": status_update.status, "updated_at": datetime.now(timezone.utc)}},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This enquiry status is locked")
+    return {"success": True, "message": "Status updated successfully"}
+
+
+@router.get("/activity-logs")
+async def activity_logs(
+    limit: int = Query(default=100, ge=1, le=500),
+    db: AsyncIOMotorDatabase = Depends(deps.get_db),
+    _: UserInDB = Depends(deps.get_current_admin_user),
+):
+    """Build a recent activity feed from live platform records."""
+    sources = [
+        ("users", "created_at", "registration", "New account registered"),
+        ("items", "created_at", "job", "Job posting created"),
+        ("applications", "created_at", "application", "Job application submitted"),
+        ("sales_enquiries", "created_at", "enquiry", "Recruiter enquiry received"),
+    ]
+    per_source = max(1, min(limit, 125))
+    events: list[dict[str, Any]] = []
+    for collection_name, date_field, event_type, default_title in sources:
+        documents = await db[collection_name].find({date_field: {"$exists": True}}).sort(date_field, -1).to_list(length=per_source)
+        for doc in documents:
+            role = doc.get("role")
+            if event_type == "registration" and role == "admin":
+                continue
+            if event_type == "registration":
+                subject = doc.get("full_name") or doc.get("email") or role or "User"
+                title = f"{role.title() if role else 'User'} account registered"
+                meta = subject
+            elif event_type == "job":
+                title = default_title
+                meta = f"{doc.get('title') or 'Untitled job'} — {doc.get('company_name') or 'Company not provided'}"
+            elif event_type == "application":
+                title = default_title
+                meta = doc.get("job_title") or f"Application status: {doc.get('status', 'submitted')}"
+            else:
+                title = default_title
+                meta = doc.get("work_email") or doc.get("full_name") or doc.get("status", "Pending review")
+            events.append({
+                "id": str(doc.get("_id", "")),
+                "type": "moderation" if event_type in {"job", "enquiry"} else "platform",
+                "title": title,
+                "meta": meta,
+                "created_at": doc[date_field].isoformat() if isinstance(doc.get(date_field), datetime) else doc.get(date_field),
+            })
+    events.sort(key=lambda item: item.get("created_at") or "", reverse=True)
+    return {"items": events[:limit], "count": min(len(events), limit)}
+
+
 @router.get("/overview")
 async def overview(
     db: AsyncIOMotorDatabase = Depends(deps.get_db),
@@ -196,6 +284,8 @@ async def overview(
     }
     return {
         "total_candidates": await users.count_documents({"role": "candidate"}),
+        "total_recruiters": await users.count_documents({"role": "recruiter"}),
+        "total_users": await users.count_documents({"role": {"$in": ["candidate", "recruiter", "admin"]}}),
         "verified_recruiters": await users.count_documents({"role": "recruiter", "company_verified": True}),
         "pending_company_approvals": await users.count_documents(pending_filter),
         "total_jobs": await items.count_documents({}),
@@ -224,10 +314,18 @@ async def users(
     role: Optional[str] = None,
     search: Optional[str] = None,
 ):
-    # Keep administrator accounts out of this management list. Passing
-    # ?role=candidate or ?role=recruiter maps directly to the corresponding
-    # MongoDB role query.
-    query: dict[str, Any] = {"role": role} if role in {"candidate", "recruiter"} else {"role": {"$in": ["candidate", "recruiter"]}}
+    # `deps.get_db` returns get_database() directly; the Motor collection
+    # calls below are the only awaitable database operations. Legacy records
+    # may still use jobseeker/employer role values.
+    normalized_role = {"jobseeker": "candidate", "employer": "recruiter"}.get((role or "").lower(), role)
+    role_values = {
+        "candidate": ["candidate", "jobseeker"],
+        "recruiter": ["recruiter", "employer"],
+    }
+    if normalized_role:
+        query: dict[str, Any] = {"role": {"$in": role_values.get(normalized_role, [normalized_role])}}
+    else:
+        query = {"role": {"$in": ["candidate", "jobseeker", "recruiter", "employer"]}}
     if search:
         query["$or"] = [
             {"full_name": {"$regex": search, "$options": "i"}},
@@ -240,23 +338,48 @@ async def users(
     docs = await collection.find(query).sort("created_at", -1).skip((page - 1) * size).limit(size).to_list(length=size)
     items = []
     for doc in docs:
-        user_dict = UserOut.model_validate(doc).model_dump(by_alias=True)
-        if doc.get("role") == "candidate":
-            user_dict["applications_count"] = await db["applications"].count_documents({"candidate_id": doc["_id"]})
-        elif doc.get("role") == "recruiter":
-            job_ids = await db["items"].distinct("_id", {"owner_id": doc["_id"]})
+        # Admin listing must tolerate legacy/partial account documents (for
+        # example, missing timestamps or non-email identifiers). Validate the
+        # write models at mutation boundaries, but don't let one old document
+        # prevent the rest of the user list from loading. Return only fields
+        # used by the admin UI and never expose password/OTP data.
+        user_id = doc.get("_id")
+        if user_id is None:
+            continue
+        stored_role = str(doc.get("role") or "user").lower()
+        normalized_doc_role = {"jobseeker": "candidate", "employer": "recruiter"}.get(stored_role, stored_role)
+        user_dict = {
+            "_id": str(user_id),
+            "id": str(user_id),
+            "full_name": doc.get("full_name") or doc.get("name"),
+            "email": doc.get("email") if isinstance(doc.get("email"), str) else "",
+            "phone": doc.get("phone") if isinstance(doc.get("phone"), str) else "",
+            "role": normalized_doc_role,
+            "company_name": doc.get("company_name") or doc.get("company"),
+            "headline": doc.get("headline"),
+            "is_active": doc.get("is_active", True),
+            "created_at": doc.get("created_at"),
+            "last_login": doc.get("last_login"),
+        }
+        if normalized_doc_role == "candidate":
+            user_dict["applications_count"] = await db["applications"].count_documents({
+                "candidate_id": {"$in": [user_id, str(user_id)]}
+            })
+        elif normalized_doc_role == "recruiter":
+            owner_refs = [user_id, str(user_id)]
+            job_ids = await db["items"].distinct("_id", {"owner_id": {"$in": owner_refs}})
             user_dict["applications_count"] = await db["applications"].count_documents({"job_id": {"$in": job_ids}}) if job_ids else 0
         else:
             user_dict["applications_count"] = 0
-        # These fields are explicitly included for the Manage Users table,
-        # including legacy documents that do not yet record last_login.
-        user_dict["full_name"] = doc.get("full_name")
-        user_dict["email"] = doc.get("email")
-        user_dict["created_at"] = doc.get("created_at")
-        user_dict["is_active"] = doc.get("is_active", True)
-        user_dict["last_login"] = doc.get("last_login")
-        items.append(user_dict)
-    return {"items": items, "total": total, "page": page, "size": size}
+        items.append(jsonable_encoder(user_dict, custom_encoder={ObjectId: str}))
+    return {
+        "success": True,
+        "users": items,
+        "items": items,
+        "total": total,
+        "page": page,
+        "size": size,
+    }
 
 
 @router.patch("/users/{user_id}")
@@ -315,10 +438,14 @@ async def delete_user(user_id: str, db: AsyncIOMotorDatabase = Depends(deps.get_
     user = await db["users"].find_one({"_id": object_id})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    job_ids = await db["items"].distinct("_id", {"owner_id": object_id})
+    # Legacy postings may have stored owner_id as text instead of BSON
+    # ObjectId. Match both representations so recruiter deletion cascades to
+    # every owned posting regardless of when it was created.
+    owner_refs = [object_id, str(object_id)]
+    job_ids = await db["items"].distinct("_id", {"owner_id": {"$in": owner_refs}})
     if job_ids:
         await db["applications"].delete_many({"job_id": {"$in": job_ids}})
-        await db["items"].delete_many({"_id": {"$in": job_ids}})
+    await db["items"].delete_many({"owner_id": {"$in": owner_refs}})
     await db["applications"].delete_many({"candidate_id": object_id})
     await db["users"].delete_one({"_id": object_id})
 
@@ -372,7 +499,15 @@ async def jobs(page: int = Query(1, ge=1), size: int = Query(50, ge=1, le=500), 
             j["company_name"] = "Company not provided"
         if "applications_count" not in j:
             j["applications_count"] = await db["applications"].count_documents({"job_id": j["_id"]})
-    return {"items": items, "total": await collection.count_documents({}), "page": page, "size": size}
+    # Aggregation results include BSON ObjectIds (job _id / owner_id), which
+    # FastAPI's default JSON encoder cannot serialize. Encode the complete
+    # result, including nested legacy fields, before returning it.
+    return {
+        "items": jsonable_encoder(items, custom_encoder={ObjectId: str}),
+        "total": await collection.count_documents({}),
+        "page": page,
+        "size": size,
+    }
 
 
 @router.patch("/jobs/{job_id}")
@@ -408,7 +543,15 @@ async def reports(db: AsyncIOMotorDatabase = Depends(deps.get_db), _: UserInDB =
         "applications": await _monthly_counts(applications, "created_at", first_month, buckets),
         "usage": {
             "total_users": await users.count_documents({}),
+            "candidate_profiles": await users.count_documents({"role": "candidate"}),
+            "recruiter_profiles": await users.count_documents({"role": "recruiter"}),
             "active_users": await users.count_documents({"is_active": True}),
+            "pending_company_approvals": await users.count_documents({
+                "role": "recruiter",
+                "company_verified": {"$ne": True},
+                "company_review_status": {"$nin": ["approved", "rejected"]},
+            }),
+            "total_jobs": await db["items"].count_documents({}),
             "published_jobs": await db["items"].count_documents({"is_published": True}),
             "completed_applications": await applications.count_documents({"status": {"$in": ["hired", "rejected"]}}),
         },

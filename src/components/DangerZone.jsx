@@ -6,7 +6,7 @@ export default function DangerZone({ role, onDeleted }) {
   const [confirmation, setConfirmation] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
-  const isConfirmed = confirmation === "DELETE";
+  const isConfirmed = confirmation.trim().toUpperCase() === "DELETE";
   const roleLabel = role === "recruiter" ? "job postings and their linked applications" : "submitted applications";
 
   async function deleteAccount() {

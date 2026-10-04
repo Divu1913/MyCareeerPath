@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Tag from '../components/Tag.jsx'
+import { api } from '../../../src/api.js'
 
 const formatDate = (value) => value ? new Date(value).toLocaleDateString() : '-'
 
@@ -9,26 +10,53 @@ export default function Users({ user }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  const load = () => {
+  const fetchUsers = useCallback(async () => {
     setLoading(true)
-    // Import the main app's API dynamically
-    import('../../../src/api.js').then(({ api }) => {
-      api.getAdminUsers({ page: 1, size: 500, role: tab })
-        .then((data) => setUsers(Array.isArray(data) ? data : data?.items || []))
-        .catch((err) => setError(err.message))
-        .finally(() => setLoading(false))
-    }).catch((err) => {
-      setError(err.message)
+    setError('')
+    try {
+      let data
+      try {
+        data = await api.getAdminUsers({ page: 1, size: 500, role: tab })
+      } catch (clientErr) {
+        const token =
+          localStorage.getItem('token') ||
+          localStorage.getItem('access_token') ||
+          localStorage.getItem('mcp_access_token') ||
+          localStorage.getItem('mcp_admin_token') ||
+          ''
+        const headers = {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        }
+        let response
+        try {
+          response = await fetch(`http://localhost:8000/api/v1/admin/users?page=1&size=500&role=${encodeURIComponent(tab)}`, { headers })
+        } catch {
+          response = await fetch(`/api/v1/admin/users?page=1&size=500&role=${encodeURIComponent(tab)}`, { headers })
+        }
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}))
+          throw new Error(errData?.detail || errData?.message || `Request failed (${response.status})`)
+        }
+        data = await response.json()
+      }
+      // Prefer `items`: the shared API client normalizes profile IDs, names,
+      // contact fields, and application counts there. The backend also
+      // includes a legacy `users` alias which contains the raw records.
+      setUsers(Array.isArray(data) ? data : data?.items || data?.users || data?.candidates || [])
+    } catch (err) {
+      console.error('Error fetching users:', err)
+      setUsers([])
+      setError(err.message || 'Failed to fetch users.')
+    } finally {
       setLoading(false)
-    })
-  }
+    }
+  }, [tab])
 
-  useEffect(load, [tab])
+  useEffect(() => { fetchUsers() }, [fetchUsers])
 
   async function toggle(userRecord) {
     try {
-      // Import the API
-      const { api } = await import('../../../src/api.js')
       const updated = await api.updateAdminUser(userRecord._id || userRecord.id, { is_active: !userRecord.is_active })
       setUsers((current) => current.map((item) => (item._id || item.id) === (userRecord._id || userRecord.id) ? updated : item))
     } catch (err) {
@@ -40,7 +68,6 @@ export default function Users({ user }) {
     const role = userRecord.role === 'candidate' ? 'recruiter' : 'candidate'
     if (!window.confirm(`Change this account to ${role}?`)) return
     try {
-      const { api } = await import('../../../src/api.js')
       const updated = await api.updateAdminUser(userRecord._id || userRecord.id, { role })
       setUsers((current) => current.map((item) => (item._id || item.id) === (userRecord._id || userRecord.id) ? updated : item))
     } catch (err) {
@@ -51,7 +78,6 @@ export default function Users({ user }) {
   async function remove(userRecord) {
     if (!window.confirm(`Delete ${userRecord.full_name || userRecord.email || 'this user'}?`)) return
     try {
-      const { api } = await import('../../../src/api.js')
       await api.deleteAdminUser(userRecord._id || userRecord.id)
       setUsers((current) => current.filter((item) => (item._id || item.id) !== (userRecord._id || userRecord.id)))
     } catch (err) {

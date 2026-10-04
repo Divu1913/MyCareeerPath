@@ -1,4 +1,5 @@
-import React from "react";
+import React, { useState } from "react";
+import RecruiterModal from "./RecruiterModal.jsx";
 
 export default function Navbar({
   user,
@@ -11,10 +12,19 @@ export default function Navbar({
   onLogout,
   subtitle,
 }) {
+  const [showRecruiterModal, setShowRecruiterModal] = useState(false);
+
   return (
     <header className="w-full border-b border-[var(--theme-border)] bg-white/95 backdrop-blur shadow-sm">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6 lg:px-8">
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setShowRecruiterModal(true)}
+            className="rounded-lg border border-slate-200 px-4 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+          >
+            For Recruiters
+          </button>
           <img
             src="/assets/logo.png"
             alt="MyCareerPath Logo"
@@ -70,7 +80,7 @@ export default function Navbar({
           )}
         </div>
       </div>
+      {showRecruiterModal && <RecruiterModal onClose={() => setShowRecruiterModal(false)} />}
     </header>
   );
 }
-

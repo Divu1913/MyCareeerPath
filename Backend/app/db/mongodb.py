@@ -139,6 +139,12 @@ async def init_db_indexes():
         name="application_status_idx",
     )
 
+    # Public sales callback queue, queried by team workflow state and newest first.
+    await db["sales_enquiries"].create_index(
+        [("status", pymongo.ASCENDING), ("created_at", pymongo.DESCENDING)],
+        name="sales_enquiry_status_created_idx",
+    )
+
     # OTP collection: TTL + lookup index
     await crud_otp.ensure_indexes(db)
 

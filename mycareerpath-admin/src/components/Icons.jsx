@@ -28,6 +28,10 @@ export const IconCheck = () => (
   <svg viewBox="0 0 24 24" {...base}><path d="m5 12 4 4L19 6" /></svg>
 )
 
+export const IconPhone = () => (
+  <svg viewBox="0 0 24 24" {...base}><path d="M7.1 3.8 4.8 5.1c-.9.5-1.3 1.6-1 2.6 1.9 6.4 6 10.5 12.4 12.4 1 .3 2.1-.1 2.6-1l1.3-2.3-4.2-2.1-1.2 1.7c-2.6-1.1-4.7-3.2-5.8-5.8l1.7-1.2-2.1-4.2Z" /></svg>
+)
+
 export const IconSearch = () => (
   <svg viewBox="0 0 24 24" {...base}><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
 )
@@ -48,4 +52,5 @@ export const navIcons = {
   reports: IconReport,
   system: IconGear,
   approvals: IconCheck,
+  enquiries: IconPhone,
 }

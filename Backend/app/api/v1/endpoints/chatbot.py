@@ -74,10 +74,9 @@ async def handle_support_chat(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="No Gemini API keys are configured."
-        )
+    )
 
     try:
-        client = genai.Client(api_key=api_key)
         formatted_contents = []
 
         for msg in request.history:

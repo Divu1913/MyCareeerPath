@@ -74,7 +74,9 @@ export function qualificationRank(value) {
     "10th Pass": 0,
     "12th Pass": 1,
     ITI: 1,
-    Diploma: 2,
+    // Recruiter requirements such as "12th / Diploma" are alternatives at
+    // the same eligibility level; neither should exclude the other.
+    Diploma: 1,
     Undergraduate: 3,
     Graduate: 3,
     Postgraduate: 4,

@@ -236,6 +236,20 @@ nav.nav {
   background: #175a4a;
 }
 
+.admin-refresh-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-refresh-spin {
+  animation: admin-refresh-rotate 1s linear infinite;
+}
+
+@keyframes admin-refresh-rotate {
+  to { transform: rotate(360deg); }
+}
+
 .btn-ghost {
   background: transparent;
   border: 1px solid var(--line);
@@ -253,6 +267,13 @@ nav.nav {
   gap: 16px;
   margin-bottom: 22px;
 }
+
+.dashboard-stat-slot { min-height: 250px; }
+.dashboard-stat-slot .stat-card { min-height: 250px; height: 100%; }
+.dashboard-chart-slot { min-height: 250px; }
+.dashboard-empty-chart { min-height: 250px; display: flex; align-items: center; justify-content: center; }
+.dashboard-chart-skeleton { min-height: 250px; border-radius: 8px; background: #f1f5f9; animation: admin-chart-pulse 1.8s ease-in-out infinite; }
+@keyframes admin-chart-pulse { 50% { opacity: .45; } }
 
 .stat-card {
   background: var(--panel);
@@ -655,6 +676,23 @@ tbody tr:hover { background: #F8FAFD; }
   background: var(--panel);
   color: var(--ink);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.tabs .tab {
+  border: 0;
+  background: transparent;
+  text-transform: capitalize;
+  font-family: inherit;
+}
+
+.tabs .tab.active {
+  background: var(--panel);
+}
+
+.btn:disabled,
+.tab:disabled {
+  cursor: not-allowed;
+  opacity: .62;
 }
 
 /* activity feed */

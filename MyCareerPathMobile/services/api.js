@@ -93,10 +93,15 @@ export const api = {
     }
     return data;
   },
-  getMe: () => request("/api/auth/me", { auth: true }),
+  getMe: () => request("/api/v1/auth/me", { auth: true }),
   
   // Public
   getPublicJobs: () => request("/api/items/public"),
+  getJobRecommendations: (skills, limit = 50) => request("/api/v1/recommendations/jobs", {
+    method: "POST",
+    body: { skills, limit },
+    auth: true,
+  }),
   
   // Auth required
   getItems: (params = {}) => {

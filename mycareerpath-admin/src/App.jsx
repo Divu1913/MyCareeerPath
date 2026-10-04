@@ -8,6 +8,7 @@ import Activity from './views/Activity.jsx'
 import Reports from './views/Reports.jsx'
 import System from './views/System.jsx'
 import Approvals from './views/Approvals.jsx'
+import RecruiterEnquiriesTable from './views/RecruiterEnquiriesTable.jsx'
 import { pageMeta } from './data.js'
 import './App.css'
 import { api } from './api.js'
@@ -16,6 +17,7 @@ const views = {
   dashboard: Dashboard,
   users: Users,
   approvals: Approvals,
+  enquiries: RecruiterEnquiriesTable,
   jobs: Jobs,
   activity: Activity,
   reports: Reports,

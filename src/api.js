@@ -1,9 +1,12 @@
 // Thin fetch wrapper for the FastAPI backend.
-// Reads VITE_API_BASE; falls back to http://127.0.0.1:8000.
+// Reads VITE_API_BASE_URL (or the legacy VITE_API_BASE); falls back to the
+// deployed development API when an environment-specific value is absent.
 // Token state lives in localStorage so a page reload doesn't drop the session.
 
 const API_BASE =
-  import.meta.env.VITE_API_BASE || "http://localhost:8000";
+  import.meta.env.VITE_API_BASE_URL ||
+  import.meta.env.VITE_API_BASE ||
+  "http://localhost:8000";
 
 const TOKEN_KEY = "mcp_access_token";
 const REFRESH_KEY = "mcp_refresh_token";
@@ -140,11 +143,28 @@ async function request(path, { method = "GET", body, auth: needsAuth = false, he
     if (token) headers.Authorization = `Bearer ${token}`;
   }
 
-  let res = await fetch(`${API_BASE}${path}`, {
-    method,
-    headers,
-    body: body ? (isMultipart ? body : JSON.stringify(body)) : undefined,
-  });
+  let res;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      method,
+      headers,
+      body: body ? (isMultipart ? body : JSON.stringify(body)) : undefined,
+    });
+  } catch (fetchErr) {
+    if (API_BASE !== "http://localhost:8000" && API_BASE !== "http://127.0.0.1:8000") {
+      try {
+        res = await fetch(`http://localhost:8000${path}`, {
+          method,
+          headers,
+          body: body ? (isMultipart ? body : JSON.stringify(body)) : undefined,
+        });
+      } catch {
+        throw fetchErr;
+      }
+    } else {
+      throw fetchErr;
+    }
+  }
 
   // Fallback between /api/v1/ and /api/ in case the server uses the alternate prefix
   if (res.status === 404 && path.startsWith("/api/v1/")) {
@@ -166,11 +186,27 @@ async function request(path, { method = "GET", body, auth: needsAuth = false, he
   if (res.status === 204) return null;
 
   const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
+  let data = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      // Proxies and unhandled backend errors often return plain text or HTML.
+      // Preserve that response as a normal API error instead of replacing it
+      // with a misleading "Unexpected token" JSON parse exception.
+      data = { detail: text };
+    }
+  }
 
   if (!res.ok) {
     const message =
       data?.detail || data?.message || `Request failed (${res.status})`;
+    if (res.status === 401 && needsAuth) {
+      auth.clear();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("mcp:unauthorized"));
+      }
+    }
     const err = new Error(message);
     err.status = res.status;
     err.data = data;
@@ -205,19 +241,19 @@ export const api = {
 
   // OTP auth — replaces the old /register and /login/access-token flow.
   sendOtp: ({ identifier, full_name, role, is_signup }) =>
-    request("/api/auth/send-otp", {
+    request("/api/v1/auth/send-otp", {
       method: "POST",
       body: { identifier, full_name, role, is_signup },
     }),
   verifyOtp: ({ identifier, code, role, is_signup }) =>
-    request("/api/auth/verify-otp", {
+    request("/api/v1/auth/verify-otp", {
       method: "POST",
       body: { identifier, code, role, is_signup },
     }),
   register: ({ identifier, password, role, full_name }) =>
-    request("/api/auth/register", { method: "POST", body: { identifier, password, role, full_name } }),
-  login: ({ identifier, password }) =>
-    request("/api/v1/auth/login", { method: "POST", body: { identifier, password } }),
+    request("/api/v1/auth/register", { method: "POST", body: { identifier, password, role, full_name } }),
+  login: ({ identifier, password, role }) =>
+    request("/api/v1/auth/login", { method: "POST", body: { identifier, password, role } }),
   sendPasswordResetOtp: ({ identifier }) =>
     request("/api/v1/auth/forgot-password/send-otp", { method: "POST", body: { identifier } }),
   resetPassword: ({ identifier, code, password }) =>
@@ -226,9 +262,9 @@ export const api = {
     request("/api/v1/admin/login", { method: "POST", body: { identifier, password } }),
   requestAdminPasswordReset: ({ email }) =>
     request("/api/v1/admin/forgot-password", { method: "POST", body: { email } }),
-  me: () => request("/api/auth/me", { auth: true }),
+  me: () => request("/api/v1/auth/me", { auth: true }),
   refresh: (refresh_token) =>
-    request("/api/auth/refresh-token", {
+    request("/api/v1/auth/refresh-token", {
       method: "POST",
       body: { refresh_token },
     }),
@@ -263,6 +299,12 @@ export const api = {
     const q = qs.toString();
     return request(`/api/items/public${q ? `?${q}` : ""}`);
   },
+  getJobRecommendations: (skills, limit = 50) =>
+    request("/api/v1/recommendations/jobs", {
+      method: "POST",
+      body: { skills, limit },
+      auth: true,
+    }),
   getSuggestedSkills: (params = {}) => {
     const qs = new URLSearchParams();
     if (params.role) qs.set("role", params.role);
@@ -359,6 +401,14 @@ export const api = {
       body: payload,
       auth: true,
     }),
+  // Update candidate contact, education, and social profile fields for the
+  // authenticated account. `auth: true` adds its Bearer token to the request.
+  updateCandidateProfile: (payload) =>
+    request("/api/v1/candidate/profile", {
+      method: "PUT",
+      body: payload,
+      auth: true,
+    }),
   updateNotificationPreferences: (preferences) => request("/api/v1/users/notification-preferences", { method: "PATCH", body: preferences, auth: true }),
   uploadProfilePhoto: (file) => {
     const formData = new FormData();
@@ -375,7 +425,7 @@ export const api = {
   },
 
   // Permanently remove the authenticated account and its role-scoped data.
-  deleteAccount: () => request("/api/users/me", { method: "DELETE", auth: true }),
+  deleteAccount: () => request("/api/v1/users/me", { method: "DELETE", auth: true }),
 
   // Admin API endpoints — all require admin role authentication.
   // Belt-and-suspenders: auth:true injects the header via request(), AND we
@@ -414,7 +464,9 @@ export const api = {
       headers: this._adminHeaders(),
     });
 
-    const rawItems = Array.isArray(data) ? data : (data?.items || []);
+    const rawItems = Array.isArray(data)
+      ? data
+      : (data?.users || data?.candidates || data?.items || []);
     const normalizedItems = rawItems.map((u) => {
       const name =
         u.full_name ||
@@ -520,6 +572,25 @@ export const api = {
     });
   },
 
+  // GET /api/v1/admin/sales-enquiries?status=pending|contacted|resolved
+  getAdminSalesEnquiries(status) {
+    const query = status && status !== "all" ? `?status=${encodeURIComponent(status)}` : "";
+    return request(`/api/v1/admin/sales-enquiries${query}`, {
+      auth: true,
+      headers: this._adminHeaders(),
+    });
+  },
+
+  // PATCH /api/v1/admin/sales-enquiries/{enquiry_id}/status
+  updateAdminSalesEnquiryStatus(enquiryId, status) {
+    return request(`/api/v1/admin/sales-enquiries/${enquiryId}/status`, {
+      method: "PATCH",
+      body: { status },
+      auth: true,
+      headers: this._adminHeaders(),
+    });
+  },
+
   // PATCH http://localhost:8000/api/v1/admin/recruiters/{user_id}/verify
   verifyRecruiter(userId, approved, reason = "") {
     return request(`/api/v1/admin/recruiters/${userId}/verify`, {
@@ -591,5 +662,17 @@ export const api = {
   downloadAdminReport(kind) {
     const endpoint = kind === "candidates" ? "/api/v1/admin/reports/candidates/export" : "/api/v1/admin/reports/jobs/export";
     return downloadAdminCsv(endpoint);
+  },
+
+  // GET http://localhost:8000/api/v1/admin/activity-logs
+  getActivityLogs(limit = 100) {
+    const qs = limit ? `?limit=${encodeURIComponent(limit)}` : "";
+    return request(`/api/v1/admin/activity-logs${qs}`, {
+      auth: true,
+      headers: this._adminHeaders(),
+    });
+  },
+  getAdminActivityLogs(limit = 100) {
+    return this.getActivityLogs(limit);
   },
 };

@@ -4,15 +4,23 @@ import { api } from '../services/api';
 
 export default function AuthScreen({ onLoginSuccess }) {
   const [role, setRole] = useState('candidate');
+  const [authMode, setAuthMode] = useState('signin');
   const [phone, setPhone] = useState('9876543210');
   const [otp, setOtp] = useState('');
+  const [devCode, setDevCode] = useState('');
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
 
   const handleSendOtp = async () => {
     try {
       setLoading(true);
-      await api.sendOtp({ phone });
+      const result = await api.sendOtp({
+        identifier: phone,
+        role,
+        is_signup: authMode === 'signup',
+      });
+      setPhone(result.identifier || phone);
+      setDevCode(result.dev_code || '');
       setStep(2);
     } catch (err) {
       Alert.alert("Error", err.message);
@@ -24,7 +32,12 @@ export default function AuthScreen({ onLoginSuccess }) {
   const handleVerifyOtp = async () => {
     try {
       setLoading(true);
-      const res = await api.verifyOtp({ phone, otp, role });
+      const res = await api.verifyOtp({
+        identifier: phone,
+        code: otp,
+        role,
+        is_signup: authMode === 'signup',
+      });
       if (res.access_token) {
         const user = await api.getMe();
         onLoginSuccess(user);
@@ -47,6 +60,22 @@ export default function AuthScreen({ onLoginSuccess }) {
         <Text className="text-xs text-gray-500 mt-1">Local Opportunities, Brighter Tomorrows</Text>
       </View>
       
+      {step === 1 && (
+        <View className="flex-row justify-between mb-4 bg-gray-200 rounded-lg p-1">
+          {['signin', 'signup'].map(mode => (
+            <TouchableOpacity
+              key={mode}
+              onPress={() => setAuthMode(mode)}
+              className={`flex-1 py-2 rounded-md items-center ${authMode === mode ? 'bg-white shadow' : ''}`}
+            >
+              <Text className={`capitalize font-semibold ${authMode === mode ? 'text-navy' : 'text-gray-500'}`}>
+                {mode === 'signin' ? 'Sign in' : 'Create account'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
       {step === 1 && (
         <View className="flex-row justify-between mb-6 bg-gray-200 rounded-lg p-1">
           {['candidate', 'recruiter', 'admin'].map(r => (
@@ -81,12 +110,18 @@ export default function AuthScreen({ onLoginSuccess }) {
         />
       )}
 
+      {__DEV__ && step === 2 && devCode ? (
+        <Text className="text-center text-amber-800 bg-amber-50 rounded-lg p-3 mb-4">
+          Development OTP: {devCode}
+        </Text>
+      ) : null}
+
       <TouchableOpacity 
         onPress={step === 1 ? handleSendOtp : handleVerifyOtp}
         disabled={loading}
         className="bg-orange rounded-lg p-4 items-center"
       >
-        {loading ? <ActivityIndicator color="#fff" /> : <Text className="text-white font-bold text-lg">{step === 1 ? 'Send OTP' : 'Verify & Login'}</Text>}
+        {loading ? <ActivityIndicator color="#fff" /> : <Text className="text-white font-bold text-lg">{step === 1 ? 'Send OTP' : (authMode === 'signup' ? 'Verify & Create Account' : 'Verify & Login')}</Text>}
       </TouchableOpacity>
       
       {step === 2 && (

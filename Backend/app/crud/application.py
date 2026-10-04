@@ -90,7 +90,7 @@ class CRUDApplication(CRUDBase[ApplicationInDB, ApplicationCreate, ApplicationSt
             },
             {"$unwind": "$job"},
             # scope to jobs this recruiter owns
-            {"$match": {"job.owner_id": owner_id, **match_app}},
+            {"$match": {"job.owner_id": {"$in": [owner_id, str(owner_id)]}, **match_app}},
             # hydrate candidate display fields
             {
                 "$lookup": {
